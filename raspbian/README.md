@@ -29,6 +29,7 @@ logout
 | Component | Description |
 |-----------|-------------|
 | **System Updates** | Full system update and upgrade |
+| **Essential Tools** | jq (JSON processor), lsof (list open files) |
 | **Network Config** | Ethernet priority + WiFi failover (automatic) |
 | **zsh + Oh My Zsh** | Modern shell with Powerlevel10k theme |
 | **zsh Plugins** | autosuggestions, syntax-highlighting, completions |
@@ -466,6 +467,7 @@ raspbian/
 After running the script successfully:
 
 ✅ Updated Raspbian system
+✅ Essential tools installed (jq, lsof)
 ✅ zsh as default shell with Powerlevel10k theme
 ✅ Java with JAVA_HOME configured system-wide
 ✅ Docker ready to use (after re-login)

@@ -171,6 +171,31 @@ update_system() {
     log_success "Cleanup completed"
 }
 
+# Install essential tools
+install_essential_tools() {
+    log_info "Installing essential tools..."
+
+    # Check if jq is already installed
+    if command -v jq &> /dev/null; then
+        log_warning "jq already installed: $(jq --version)"
+    else
+        log_info "Installing jq (JSON processor)..."
+        run_sudo apt-get install -y jq
+        log_success "jq installed"
+    fi
+
+    # Check if lsof is already installed
+    if command -v lsof &> /dev/null; then
+        log_warning "lsof already installed"
+    else
+        log_info "Installing lsof (list open files)..."
+        run_sudo apt-get install -y lsof
+        log_success "lsof installed"
+    fi
+
+    log_success "Essential tools installed"
+}
+
 ###############################################################################
 # 2. Install zsh and Oh My Zsh
 ###############################################################################
@@ -713,6 +738,7 @@ main() {
     # 1. Update system
     log_info "=== Step 1/5: Updating System ==="
     update_system
+    install_essential_tools
     echo ""
 
     # 2. Install zsh and Oh My Zsh
@@ -750,6 +776,7 @@ main() {
     echo ""
     log_info "Summary of installed software:"
     echo "  • System: Updated and upgraded"
+    echo "  • Essential tools: jq, lsof"
     echo "  • zsh: $(zsh --version 2>&1 | head -n 1)"
     echo "  • Oh My Zsh: Installed with Powerlevel10k theme"
     echo "  • Java: $(java -version 2>&1 | head -n 1)"
