@@ -234,7 +234,26 @@ docker restart conduit
 docker ps | grep conduit
 ```
 
-**📖 Full Guide**: See `CONDUIT-SETUP.md` for complete documentation
+### Monitor Connections
+
+Visualize connections with real-time monitoring:
+
+```bash
+# Start connection monitor
+./conduit-monitor.sh
+
+# With custom refresh interval (5 seconds)
+./conduit-monitor.sh 5
+```
+
+**Monitor Features:**
+- 📊 Real-time connection statistics
+- 🌍 IP geolocation (city, country)
+- 📈 Geographic distribution
+- 🔄 Live updates every 3 seconds (default)
+- 🎨 Color-coded output
+
+**📖 Full Guide**: See `CONDUIT-SETUP.md` and `CONDUIT-MONITOR.md` for complete documentation
 
 ---
 
@@ -430,11 +449,13 @@ raspbian/
 ├── initial-setup.sh           Main installation script
 ├── setup-portainer.sh         Portainer setup/management script (optional)
 ├── setup-conduit.sh           Conduit load balancer script (optional)
+├── conduit-monitor.sh         Conduit connection monitor/visualizer (optional)
 ├── wifi-config.txt            WiFi credentials (edit before running)
 ├── portainer-compose.yml      Portainer Docker Compose config (reference)
 ├── test-network-info.sh       Network info test script
 ├── NETWORK-CONFIG.md          Network configuration guide
 ├── CONDUIT-SETUP.md           Conduit setup and management guide
+├── CONDUIT-MONITOR.md         Conduit monitoring guide
 └── README.md                  This file
 ```
 
