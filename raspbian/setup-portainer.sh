@@ -53,26 +53,69 @@ check_and_free_port() {
 
     log_info "Checking if port $port is available..."
 
+    # Check if lsof is available
+    if ! command -v lsof &> /dev/null; then
+        log_warning "lsof not found, installing..."
+        run_sudo apt-get install -y lsof
+    fi
+
+    # Check if port is in use
     if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
         log_warning "Port $port is already in use by another process"
 
         local pid
         local process_name
         pid=$(lsof -Pi :$port -sTCP:LISTEN -t 2>/dev/null | head -n 1)
+
+        if [ -z "$pid" ]; then
+            log_error "Could not determine PID for port $port"
+            # Try alternative method with netstat
+            pid=$(netstat -tlnp 2>/dev/null | grep ":$port " | awk '{print $7}' | cut -d'/' -f1 | head -n 1)
+        fi
+
+        if [ -z "$pid" ]; then
+            log_error "Failed to find process using port $port"
+            return 1
+        fi
+
         process_name=$(ps -p $pid -o comm= 2>/dev/null || echo "unknown")
 
         log_warning "Process using port $port: $process_name (PID: $pid)"
         log_info "Killing process $pid to free port $port..."
-        run_sudo kill -9 $pid 2>/dev/null || true
-        sleep 2
 
-        if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
-            log_error "Failed to free port $port"
-            return 1
-        else
-            log_success "Port $port freed successfully"
-            return 0
+        # Try regular kill first
+        run_sudo kill $pid 2>/dev/null || true
+        sleep 1
+
+        # If still running, force kill
+        if ps -p $pid > /dev/null 2>&1; then
+            log_info "Process still running, forcing kill..."
+            run_sudo kill -9 $pid 2>/dev/null || true
+            sleep 2
         fi
+
+        # Verify port is freed
+        if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
+            log_error "Failed to free port $port - process may have restarted or is protected"
+
+            # One more attempt - find and kill again
+            local new_pid
+            new_pid=$(lsof -Pi :$port -sTCP:LISTEN -t 2>/dev/null | head -n 1)
+            if [ -n "$new_pid" ]; then
+                log_warning "Found process restarted with PID: $new_pid, killing again..."
+                run_sudo kill -9 $new_pid 2>/dev/null || true
+                sleep 2
+            fi
+
+            # Final check
+            if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
+                log_error "Port $port is still in use. Please manually stop the process and try again."
+                return 1
+            fi
+        fi
+
+        log_success "Port $port freed successfully"
+        return 0
     else
         log_success "Port $port is available"
         return 0
@@ -82,8 +125,29 @@ check_and_free_port() {
 # Free required ports
 free_portainer_ports() {
     log_info "Freeing required ports for Portainer..."
-    check_and_free_port 9000 "Portainer HTTP"
-    check_and_free_port 9443 "Portainer HTTPS"
+
+    local ports_freed=true
+
+    if ! check_and_free_port 9000 "Portainer HTTP"; then
+        ports_freed=false
+        log_error "Could not free port 9000"
+    fi
+
+    if ! check_and_free_port 9443 "Portainer HTTPS"; then
+        ports_freed=false
+        log_error "Could not free port 9443"
+    fi
+
+    if [ "$ports_freed" = false ]; then
+        log_error "Failed to free required ports. Cannot proceed with Portainer installation."
+        echo ""
+        log_info "Troubleshooting steps:"
+        echo "  1. Check what's using the ports: sudo lsof -i :9000 -i :9443"
+        echo "  2. Manually stop the service"
+        echo "  3. Try running this script again"
+        exit 1
+    fi
+
     log_success "All required ports are available"
 }
 
@@ -138,6 +202,28 @@ remove_portainer() {
     fi
 }
 
+# Show what's using Portainer ports
+show_port_usage() {
+    log_info "Checking port usage..."
+    echo ""
+
+    if command -v lsof &> /dev/null; then
+        for port in 9000 9443; do
+            if lsof -Pi :$port -sTCP:LISTEN >/dev/null 2>&1; then
+                echo "Port $port:"
+                lsof -Pi :$port -sTCP:LISTEN 2>/dev/null | grep -v "^COMMAND" || true
+            else
+                echo "Port $port: Available"
+            fi
+        done
+    elif command -v netstat &> /dev/null; then
+        netstat -tlnp 2>/dev/null | grep -E ":(9000|9443) " || echo "Ports 9000 and 9443: Available"
+    else
+        log_warning "Neither lsof nor netstat available, cannot check port usage"
+    fi
+    echo ""
+}
+
 # Install Portainer
 install_portainer() {
     log_info "Installing Portainer..."
@@ -149,6 +235,8 @@ install_portainer() {
     # Create docker-compose.yml
     log_info "Creating Portainer docker-compose.yml..."
     cat > "$PORTAINER_DIR/docker-compose.yml" << 'EOF'
+version: '3.8'
+
 services:
   portainer:
     image: portainer/portainer-ce:latest
@@ -248,6 +336,10 @@ main() {
     fi
 
     log_success "Docker is installed and running"
+
+    # Show what's using the ports
+    echo ""
+    show_port_usage
 
     # Remove existing Portainer
     echo ""
