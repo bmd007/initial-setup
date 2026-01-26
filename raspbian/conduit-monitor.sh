@@ -105,10 +105,15 @@ get_connection_stats() {
     # Count different types of events (adjust patterns based on actual Conduit logs)
     local total_connections=$(echo "$logs" | grep -c "connection\|connect\|established" 2>/dev/null || echo "0")
     local active_connections=$(docker exec "$CONTAINER_NAME" sh -c "netstat -an 2>/dev/null | grep -c ESTABLISHED" 2>/dev/null || echo "0")
+
+    # Track incoming connection requests
+    local incoming_requests=$(echo "$logs" | grep -ci "request\|incoming\|accept\|client" 2>/dev/null || echo "0")
+    local successful_accepts=$(echo "$logs" | grep -ci "accepted\|connected" 2>/dev/null || echo "0")
+
     local errors=$(echo "$logs" | grep -c "error\|Error\|ERROR" 2>/dev/null || echo "0")
     local warnings=$(echo "$logs" | grep -c "warning\|Warning\|WARN" 2>/dev/null || echo "0")
 
-    echo "$total_connections|$active_connections|$errors|$warnings"
+    echo "$total_connections|$active_connections|$errors|$warnings|$incoming_requests|$successful_accepts"
 }
 
 # Display header
@@ -127,13 +132,25 @@ show_header() {
 # Display statistics summary
 show_stats() {
     local stats=$1
-    IFS='|' read -r total active errors warnings <<< "$stats"
+    IFS='|' read -r total active errors warnings incoming_req successful <<< "$stats"
 
     echo -e "${BOLD}${MAGENTA}═══ Connection Statistics ═══${NC}"
     echo -e "${GREEN}●${NC} Total Connections (logged): ${BOLD}$total${NC}"
     echo -e "${GREEN}●${NC} Active Connections: ${BOLD}$active${NC}"
+    echo -e "${CYAN}●${NC} Incoming Requests: ${BOLD}$incoming_req${NC}"
+    echo -e "${CYAN}●${NC} Successful Accepts: ${BOLD}$successful${NC}"
     echo -e "${YELLOW}●${NC} Warnings: ${BOLD}$warnings${NC}"
     echo -e "${RED}●${NC} Errors: ${BOLD}$errors${NC}"
+
+    # Show if receiving requests
+    if [ "$incoming_req" -gt 0 ]; then
+        echo ""
+        echo -e "${GREEN}${BOLD}✓ RECEIVING CONNECTION REQUESTS${NC}"
+    else
+        echo ""
+        echo -e "${YELLOW}${BOLD}⚠ NO CONNECTION REQUESTS DETECTED${NC}"
+        echo -e "${YELLOW}  This may be normal for new nodes (reputation building)${NC}"
+    fi
     echo ""
 }
 
@@ -207,6 +224,35 @@ show_map_visualization() {
     fi
 }
 
+# Display recent connection requests
+show_connection_requests() {
+    echo ""
+    echo -e "${BOLD}${MAGENTA}═══ Recent Connection Requests ═══${NC}"
+
+    if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+        local requests=$(docker logs "$CONTAINER_NAME" --tail 50 2>&1 | grep -i "request\|incoming\|accept\|client" | tail -10)
+
+        if [ -n "$requests" ]; then
+            echo "$requests" | while IFS= read -r line; do
+                # Highlight different types of requests
+                if echo "$line" | grep -qi "accept\|connected"; then
+                    echo -e "${GREEN}✓${NC} ${line}"
+                elif echo "$line" | grep -qi "request\|incoming"; then
+                    echo -e "${CYAN}→${NC} ${line}"
+                elif echo "$line" | grep -qi "reject\|denied"; then
+                    echo -e "${RED}✗${NC} ${line}"
+                else
+                    echo -e "${NC}  ${line}"
+                fi
+            done
+        else
+            echo -e "${YELLOW}No connection requests in recent logs${NC}"
+            echo -e "${YELLOW}Note: New Conduit nodes need time to build reputation${NC}"
+            echo -e "${YELLOW}      It may take hours/days before receiving requests${NC}"
+        fi
+    fi
+}
+
 # Display recent connection activity
 show_recent_activity() {
     echo ""
@@ -263,6 +309,9 @@ monitor_loop() {
 
         # Show geographic distribution
         show_map_visualization
+
+        # Show connection requests
+        show_connection_requests
 
         # Show recent activity
         show_recent_activity
