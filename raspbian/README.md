@@ -235,6 +235,24 @@ docker restart conduit
 docker ps | grep conduit
 ```
 
+### Health Check
+
+Verify Conduit is working properly:
+
+```bash
+# Run comprehensive health check
+./conduit-health.sh
+```
+
+**Health Check Features:**
+- ✅ Container status verification
+- ✅ Resource usage monitoring
+- ✅ Identity key validation
+- ✅ Psiphon config verification
+- ✅ Network connectivity tests
+- ✅ Log analysis for errors
+- ✅ Psiphon broker connection status
+
 ### Monitor Connections
 
 Visualize connections with real-time monitoring:
@@ -451,12 +469,13 @@ raspbian/
 ├── setup-portainer.sh         Portainer setup/management script (optional)
 ├── setup-conduit.sh           Conduit load balancer script (optional)
 ├── conduit-monitor.sh         Conduit connection monitor/visualizer (optional)
+├── conduit-health.sh          Conduit health check tool (optional)
 ├── wifi-config.txt            WiFi credentials (edit before running)
 ├── portainer-compose.yml      Portainer Docker Compose config (reference)
 ├── test-network-info.sh       Network info test script
 ├── NETWORK-CONFIG.md          Network configuration guide
 ├── CONDUIT-SETUP.md           Conduit setup and management guide
-├── CONDUIT-MONITOR.md         Conduit monitoring guide
+├── CONDUIT-MONITOR.md         Conduit monitoring & health check guide
 └── README.md                  This file
 ```
 

@@ -16,6 +16,8 @@ Conduit is a load balancer and traffic manager for Psiphon infrastructure. It pr
 - Connection pooling
 - High availability setup
 
+**Important:** Conduit requires a Psiphon network configuration file (`psiphon_config.json`) to connect to the Psiphon network. This file must be obtained from the Psiphon team. See: https://github.com/Psiphon-Inc/conduit
+
 ---
 
 ## Installation
@@ -24,6 +26,7 @@ Conduit is a load balancer and traffic manager for Psiphon infrastructure. It pr
 - Docker and Docker Compose installed
 - Raspberry Pi (or any Linux server)
 - Port 8080 available (or custom port)
+- **Psiphon configuration file** (psiphon_config.json)
 
 ### Quick Setup
 
@@ -37,6 +40,8 @@ chmod +x setup-conduit.sh
 # Or specify custom port
 ./setup-conduit.sh YourSudoPassword 9090
 ```
+
+**⚠️ Note:** After installation, you need to add your `psiphon_config.json` file to `~/conduit/` directory for Conduit to work properly.
 
 ---
 

@@ -1,10 +1,113 @@
-# Conduit Connection Monitor Guide
+# Conduit Connection Monitor & Health Check Guide
 
 ## Overview
 
-`conduit-monitor.sh` is a real-time visualization tool for monitoring Conduit connections, showing source IPs and their geographic locations.
+Conduit is a **Psiphon proxy node** that connects to the Psiphon network and helps users bypass censorship.
 
-![Monitor Screenshot](https://via.placeholder.com/800x400?text=Conduit+Connection+Monitor)
+**Official Repository:** https://github.com/Psiphon-Inc/conduit
+
+This guide covers two tools:
+1. **conduit-monitor.sh** - Real-time connection visualization
+2. **conduit-health.sh** - Health check and verification tool
+
+---
+
+## What is Conduit?
+
+Conduit is part of the Psiphon circumvention system:
+- **Purpose**: Acts as a proxy node in the Psiphon network
+- **Function**: Helps users bypass internet censorship
+- **Reputation**: Builds trust with Psiphon broker over time
+- **Key**: Uses persistent identity key (conduit_key.json)
+
+### Requirements
+- Psiphon network configuration file (psiphon_config.json)
+- Persistent data directory for identity key
+- Network connectivity to Psiphon infrastructure
+
+---
+
+## Health Check Tool
+
+### Quick Health Check
+
+```bash
+# Run comprehensive health check
+./conduit-health.sh
+```
+
+### What It Checks
+
+1. **Container Status** - Is Conduit running?
+2. **Resource Usage** - CPU, memory, network I/O
+3. **Data Directory** - Identity key presence
+4. **Psiphon Config** - Configuration file validity
+5. **Container Logs** - Errors, warnings, connectivity
+6. **Network** - DNS resolution, outbound connectivity
+7. **Recent Activity** - Log analysis from last hour
+
+### Example Output
+
+```
+╔════════════════════════════════════════════════════════════════════════════╗
+║                    Conduit Health Check                                    ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+═══ Running Health Checks ═══
+
+[TEST] Checking if Conduit container is running...
+[✓] Container is running
+  ↳ Status: Up 2 hours
+
+[TEST] Checking container resource usage...
+[✓] Resource usage:
+  ↳ CPU: 2.5%
+  ↳ Memory: 45.2MB / 8GB
+  ↳ Network I/O: 1.2MB / 850KB
+
+[TEST] Checking data directory...
+[✓] Data directory exists
+[✓] Identity key found (conduit_key.json)
+  ↳ This key maintains your Psiphon broker reputation
+  ↳ Keep this file backed up and persistent!
+
+[TEST] Checking Psiphon configuration...
+[✓] Psiphon config exists
+[✓] Config is valid JSON
+
+[TEST] Analyzing container logs...
+[✓] No errors in recent logs
+  ↳ Log summary: 145 info, 3 warnings, 0 errors
+
+[TEST] Checking Psiphon network connectivity...
+[✓] Connection indicators found in logs
+  ↳ Recent connections:
+    INFO: Connected to broker
+    INFO: Tunnel established
+
+═══ Health Check Summary ═══
+
+✓ Conduit appears to be running properly
+
+Note: Full functionality depends on:
+  • Valid Psiphon configuration
+  • Network connectivity to Psiphon infrastructure  
+  • Broker reputation (builds over time)
+```
+
+---
+
+## Connection Monitor
+
+### Real-Time Monitoring
+
+```bash
+# Start monitor with default refresh (3 seconds)
+./conduit-monitor.sh
+
+# Custom refresh interval
+./conduit-monitor.sh 5  # Update every 5 seconds
+```
 
 ---
 
@@ -222,6 +325,105 @@ CONTAINER_NAME="conduit"  # To your container name
 ---
 
 ## Troubleshooting
+
+### Conduit Not Connecting to Psiphon Network
+
+**Check logs for connection issues:**
+```bash
+docker logs conduit | grep -i "error\|fail\|refused"
+```
+
+**Common issues:**
+
+1. **Missing Psiphon Config**
+```bash
+# Check if config exists
+ls -l ~/conduit/psiphon_config.json
+
+# If missing, you need to obtain one from Psiphon
+# Contact: https://github.com/Psiphon-Inc/conduit
+```
+
+2. **Invalid Configuration**
+```bash
+# Validate JSON
+jq empty ~/conduit/psiphon_config.json
+
+# Check for required fields
+jq 'keys' ~/conduit/psiphon_config.json
+```
+
+3. **Network Connectivity Issues**
+```bash
+# Test from container
+docker exec conduit ping -c 4 8.8.8.8
+
+# Test DNS
+docker exec conduit nslookup google.com
+```
+
+4. **Firewall Blocking Outbound**
+```bash
+# Check if firewall is blocking
+sudo iptables -L OUTPUT -n
+
+# Conduit needs outbound HTTPS (443) access
+sudo ufw allow out 443/tcp
+```
+
+5. **Identity Key Issues**
+```bash
+# Check if key exists
+ls -l ~/conduit/data/conduit_key.json
+
+# If missing, it will be generated on first run
+# Ensure data directory is persistent!
+```
+
+### Low Reputation / No Client Connections
+
+**This is normal for new nodes:**
+- Psiphon broker tracks proxy reputation by key
+- New proxies start with zero reputation
+- Reputation builds over time (hours to days)
+- Keep your identity key persistent across restarts
+
+**Check reputation status:**
+```bash
+# Look for broker communication in logs
+docker logs conduit | grep -i "broker\|reputation"
+```
+
+### Container is Running But Not Working
+
+1. **Check recent logs:**
+```bash
+docker logs conduit --tail 50
+```
+
+2. **Run health check:**
+```bash
+./conduit-health.sh
+```
+
+3. **Verify configuration:**
+```bash
+# Check command line args
+docker inspect conduit | jq '.[0].Config.Cmd'
+
+# Should include:
+# - start
+# - --psiphon-config
+# - -b (bandwidth)
+# - -m (max clients)
+# - -vv (verbose)
+```
+
+4. **Check data directory permissions:**
+```bash
+ls -ld ~/conduit/data
+# Should be owned by your user or container user
+```
 
 ### "Container is not running"
 ```bash
