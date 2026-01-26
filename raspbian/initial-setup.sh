@@ -263,7 +263,7 @@ EOF
 }
 
 ###############################################################################
-# 4. Install Docker and Docker Compose
+# 4. Install Docker, Docker Compose, and Portainer
 ###############################################################################
 install_docker() {
     log_info "Installing Docker..."
@@ -363,6 +363,70 @@ install_docker_compose() {
     fi
 }
 
+install_portainer() {
+    log_info "Installing Portainer..."
+
+    # Create directory for Portainer
+    PORTAINER_DIR="$HOME/portainer"
+    mkdir -p "$PORTAINER_DIR"
+
+    # Create docker-compose.yml for Portainer
+    log_info "Creating Portainer docker-compose.yml..."
+    cat > "$PORTAINER_DIR/docker-compose.yml" << 'EOF'
+version: '3.8'
+
+services:
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "9000:9000"      # HTTP Web UI
+      - "9443:9443"      # HTTPS Web UI
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - portainer_data:/data
+    environment:
+      - TZ=UTC
+
+volumes:
+  portainer_data:
+    driver: local
+EOF
+
+    log_success "Portainer docker-compose.yml created at $PORTAINER_DIR"
+
+    # Start Portainer using docker-compose
+    log_info "Starting Portainer container..."
+    cd "$PORTAINER_DIR"
+
+    # Use docker-compose or docker compose depending on what's available
+    if docker compose version &> /dev/null; then
+        sudo docker compose up -d
+    elif command -v docker-compose &> /dev/null; then
+        sudo docker-compose up -d
+    else
+        log_error "Neither 'docker compose' nor 'docker-compose' is available"
+        return 1
+    fi
+
+    cd - > /dev/null
+
+    log_success "Portainer installed and started"
+
+    # Get the IP address
+    IP_ADDR=$(hostname -I | awk '{print $1}')
+
+    log_info "Portainer is accessible at:"
+    echo "  • HTTP:  http://${IP_ADDR}:9000"
+    echo "  • HTTPS: https://${IP_ADDR}:9443"
+    echo ""
+    log_info "Note: On first access, you'll need to create an admin account"
+    log_info "Portainer compose file location: $PORTAINER_DIR/docker-compose.yml"
+}
+
 ###############################################################################
 # Main Execution
 ###############################################################################
@@ -411,9 +475,10 @@ main() {
     echo ""
 
     # 4. Install Docker
-    log_info "=== Step 4/4: Installing Docker and Docker Compose ==="
+    log_info "=== Step 4/4: Installing Docker, Docker Compose, and Portainer ==="
     install_docker
     install_docker_compose
+    install_portainer
     echo ""
 
     # Summary
@@ -428,12 +493,14 @@ main() {
     echo "  • Java: $(java -version 2>&1 | head -n 1)"
     echo "  • Docker: $(docker --version)"
     echo "  • Docker Compose: $(docker-compose --version 2>/dev/null || echo 'plugin version')"
+    echo "  • Portainer: Installed and running"
     echo ""
     log_warning "Important notes:"
     echo "  1. Please log out and log back in for shell changes to take effect"
     echo "  2. Docker group membership requires re-login to take effect"
     echo "  3. Run 'p10k configure' to configure Powerlevel10k theme"
     echo "  4. JAVA_HOME is set to: $JAVA_HOME"
+    echo "  5. Portainer web UI: http://$(hostname -I | awk '{print $1}'):9000"
     echo ""
     log_info "You can now start using your configured Raspbian system!"
     echo ""

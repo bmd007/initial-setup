@@ -42,6 +42,13 @@ This script automates the following setup tasks:
 - Adds current user to the docker group
 - Enables Docker service to start on boot
 
+### 5. Portainer Installation
+- Installs Portainer CE (Community Edition) via docker-compose
+- Creates a docker-compose.yml file in `~/portainer/`
+- Automatically starts Portainer container
+- Accessible via web browser on ports 9000 (HTTP) and 9443 (HTTPS)
+- Provides a user-friendly web UI for managing Docker containers, images, networks, and volumes
+
 ## Prerequisites
 
 - Fresh Raspbian (Raspberry Pi OS) 64-bit installation
@@ -90,6 +97,10 @@ After the script completes:
    ```bash
    docker run hello-world
    ```
+4. **Access Portainer** in your web browser:
+   - Navigate to `http://YOUR_PI_IP:9000` (the script will show you the exact URL)
+   - Create an admin account on first access
+   - Select "Docker" as the environment to manage
 
 ## What Gets Installed
 
@@ -100,6 +111,7 @@ After the script completes:
 | Java (OpenJDK) | Latest available (17+ on recent Raspbian) | With JAVA_HOME configured |
 | Docker | Latest from docker.com | Installed via official script |
 | Docker Compose | Latest | Both plugin and standalone |
+| Portainer CE | Latest | Docker management web UI |
 
 ## Customization
 
@@ -181,6 +193,48 @@ source ~/.zshrc
 source ~/.zshrc
 
 # Or restart your terminal
+```
+
+### Portainer not accessible
+
+```bash
+# Check if Portainer is running
+docker ps | grep portainer
+
+# View Portainer logs
+docker logs portainer
+
+# Restart Portainer
+cd ~/portainer
+docker-compose restart
+
+# Stop and remove Portainer
+cd ~/portainer
+docker-compose down
+
+# Start Portainer again
+cd ~/portainer
+docker-compose up -d
+```
+
+### Managing Portainer
+
+The Portainer configuration is stored in `~/portainer/docker-compose.yml`. You can:
+
+```bash
+# Stop Portainer
+cd ~/portainer && docker-compose down
+
+# Start Portainer
+cd ~/portainer && docker-compose up -d
+
+# View Portainer logs
+docker logs portainer -f
+
+# Update Portainer to latest version
+cd ~/portainer
+docker-compose pull
+docker-compose up -d
 ```
 
 ## Script Behavior
