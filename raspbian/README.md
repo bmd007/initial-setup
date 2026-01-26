@@ -2,6 +2,8 @@
 
 A comprehensive bash script to set up a fresh Raspbian (Raspberry Pi OS) installation with all essential development tools.
 
+**✨ Key Feature: This script is fully idempotent - you can run it multiple times safely without any negative effects!**
+
 ## Features
 
 This script automates the following setup tasks:
@@ -245,13 +247,37 @@ docker-compose up -d
 
 ## Script Behavior
 
-- ✅ Displays all network interfaces and IP addresses at startup
-- ✅ Safe to run multiple times (idempotent where possible)
-- ✅ Backs up existing `.zshrc` before modifications
-- ✅ Colored output for better readability
-- ✅ Error handling with `set -e`
-- ✅ Verification steps after each installation
-- ✅ Detailed logging of all operations
+### ✅ Fully Idempotent
+The script is designed to be **safe to run multiple times**. On subsequent runs:
+- **Already installed packages** are detected and skipped
+- **Existing configurations** are preserved (not overwritten)
+- **Running services** are detected and left running
+- **Backup files** use timestamps to avoid conflicts
+- **No duplicate entries** are added to configuration files
+
+### ✅ Other Features
+- Displays all network interfaces and IP addresses at startup
+- Backs up existing `.zshrc` with timestamps before modifications
+- Colored output for better readability
+- Error handling with `set -euo pipefail`
+- Verification steps after each installation
+- Detailed logging of all operations
+
+### What Happens on Multiple Runs?
+
+| Component | First Run | Subsequent Runs |
+|-----------|-----------|-----------------|
+| System Updates | Full update/upgrade | Updates only if available |
+| zsh | Installs | Skips if already installed |
+| Oh My Zsh | Installs | Skips if directory exists |
+| Themes/Plugins | Clones repositories | Skips if already present |
+| Java | Installs | Skips if java command exists |
+| Docker | Full installation | Checks version, ensures user in group |
+| Docker Compose | Downloads binary | Skips if already at /usr/local/bin |
+| Portainer | Creates and starts | Checks if running, starts if stopped |
+| Config Files | Creates/modifies | Checks before modifying, skips duplicates |
+
+**Result:** Running the script multiple times will update what needs updating and skip what's already configured, with clear messaging about what's being done.
 
 ## Security Notes
 

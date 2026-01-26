@@ -6,10 +6,11 @@
 # - Updates and upgrades system packages
 # - Installs zsh and Oh My Zsh with themes
 # - Installs latest Java and configures environment
-# - Installs Docker and Docker Compose
+# - Installs Docker, Docker Compose, and Portainer
 ###############################################################################
 
-set -e  # Exit on error
+# Note: Script is idempotent - safe to run multiple times
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
 # Colors for output
 RED='\033[0;31m'
@@ -161,14 +162,19 @@ update_system() {
 install_zsh() {
     log_info "Installing zsh..."
 
-    # Install zsh and dependencies
-    sudo apt-get install -y zsh git curl wget
-    log_success "zsh installed"
+    # Check if already installed
+    if command -v zsh &> /dev/null; then
+        log_warning "zsh already installed: $(zsh --version)"
+    else
+        # Install zsh and dependencies
+        sudo apt-get install -y zsh git curl wget
+        log_success "zsh installed"
 
-    # Check zsh installation
-    if ! command -v zsh &> /dev/null; then
-        log_error "zsh installation failed"
-        exit 1
+        # Verify installation
+        if ! command -v zsh &> /dev/null; then
+            log_error "zsh installation failed"
+            exit 1
+        fi
     fi
 
     log_info "zsh version: $(zsh --version)"
@@ -177,14 +183,15 @@ install_zsh() {
 install_oh_my_zsh() {
     log_info "Installing Oh My Zsh..."
 
-    # Backup existing .zshrc if it exists
-    if [ -f "$HOME/.zshrc" ]; then
-        log_warning "Backing up existing .zshrc to .zshrc.backup"
-        cp "$HOME/.zshrc" "$HOME/.zshrc.backup"
-    fi
-
     # Install Oh My Zsh (unattended)
     if [ ! -d "$HOME/.oh-my-zsh" ]; then
+        # Backup existing .zshrc if it exists
+        if [ -f "$HOME/.zshrc" ]; then
+            BACKUP_FILE="$HOME/.zshrc.backup.$(date +%Y%m%d_%H%M%S)"
+            log_warning "Backing up existing .zshrc to $BACKUP_FILE"
+            cp "$HOME/.zshrc" "$BACKUP_FILE"
+        fi
+
         RUNZSH=no CHSH=no sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
         log_success "Oh My Zsh installed"
     else
@@ -202,6 +209,8 @@ install_zsh_themes_and_plugins() {
         log_info "Installing Powerlevel10k theme..."
         git clone --depth=1 https://github.com/romkatv/powerlevel10k.git "$ZSH_CUSTOM/themes/powerlevel10k"
         log_success "Powerlevel10k installed"
+    else
+        log_warning "Powerlevel10k already installed, skipping..."
     fi
 
     # Install zsh-autosuggestions
@@ -209,6 +218,8 @@ install_zsh_themes_and_plugins() {
         log_info "Installing zsh-autosuggestions..."
         git clone https://github.com/zsh-users/zsh-autosuggestions "$ZSH_CUSTOM/plugins/zsh-autosuggestions"
         log_success "zsh-autosuggestions installed"
+    else
+        log_warning "zsh-autosuggestions already installed, skipping..."
     fi
 
     # Install zsh-syntax-highlighting
@@ -216,6 +227,8 @@ install_zsh_themes_and_plugins() {
         log_info "Installing zsh-syntax-highlighting..."
         git clone https://github.com/zsh-users/zsh-syntax-highlighting.git "$ZSH_CUSTOM/plugins/zsh-syntax-highlighting"
         log_success "zsh-syntax-highlighting installed"
+    else
+        log_warning "zsh-syntax-highlighting already installed, skipping..."
     fi
 
     # Install zsh-completions
@@ -223,9 +236,11 @@ install_zsh_themes_and_plugins() {
         log_info "Installing zsh-completions..."
         git clone https://github.com/zsh-users/zsh-completions "$ZSH_CUSTOM/plugins/zsh-completions"
         log_success "zsh-completions installed"
+    else
+        log_warning "zsh-completions already installed, skipping..."
     fi
 
-    log_success "All themes and plugins installed"
+    log_success "All themes and plugins checked"
 }
 
 configure_zshrc() {
@@ -236,18 +251,31 @@ configure_zshrc() {
         cp "$HOME/.oh-my-zsh/templates/zshrc.zsh-template" "$HOME/.zshrc"
     fi
 
-    # Update theme to Powerlevel10k
-    sed -i 's/^ZSH_THEME=.*/ZSH_THEME="powerlevel10k\/powerlevel10k"/' "$HOME/.zshrc"
-
-    # Update plugins
-    sed -i 's/^plugins=.*/plugins=(git docker docker-compose zsh-autosuggestions zsh-syntax-highlighting zsh-completions)/' "$HOME/.zshrc"
-
-    # Add fpath for completions
-    if ! grep -q "fpath+=\${ZSH_CUSTOM" "$HOME/.zshrc"; then
-        sed -i '/^source \$ZSH\/oh-my-zsh.sh/i fpath+=${ZSH_CUSTOM:-${ZSH:-~/.oh-my-zsh}/custom}/plugins/zsh-completions/src' "$HOME/.zshrc"
+    # Update theme to Powerlevel10k (only if not already set)
+    if ! grep -q 'ZSH_THEME="powerlevel10k/powerlevel10k"' "$HOME/.zshrc"; then
+        sed -i.bak 's/^ZSH_THEME=.*/ZSH_THEME="powerlevel10k\/powerlevel10k"/' "$HOME/.zshrc"
+        log_success "Theme updated to Powerlevel10k"
+    else
+        log_warning "Powerlevel10k theme already configured"
     fi
 
-    log_success ".zshrc configured"
+    # Update plugins (only if not already set correctly)
+    if ! grep -q 'plugins=(git docker docker-compose zsh-autosuggestions zsh-syntax-highlighting zsh-completions)' "$HOME/.zshrc"; then
+        sed -i.bak 's/^plugins=.*/plugins=(git docker docker-compose zsh-autosuggestions zsh-syntax-highlighting zsh-completions)/' "$HOME/.zshrc"
+        log_success "Plugins updated"
+    else
+        log_warning "Plugins already configured"
+    fi
+
+    # Add fpath for completions (only if not already added)
+    if ! grep -q "fpath+=\${ZSH_CUSTOM" "$HOME/.zshrc"; then
+        sed -i.bak '/^source \$ZSH\/oh-my-zsh.sh/i fpath+=${ZSH_CUSTOM:-${ZSH:-~/.oh-my-zsh}/custom}/plugins/zsh-completions/src' "$HOME/.zshrc"
+        log_success "Completion path added"
+    else
+        log_warning "Completion path already configured"
+    fi
+
+    log_success ".zshrc configuration complete"
 }
 
 change_default_shell() {
@@ -266,6 +294,15 @@ change_default_shell() {
 # 3. Install Java
 ###############################################################################
 install_java() {
+    log_info "Checking Java installation..."
+
+    # Check if Java is already installed
+    if command -v java &> /dev/null; then
+        JAVA_VERSION=$(java -version 2>&1 | head -n 1)
+        log_warning "Java already installed: $JAVA_VERSION"
+        return 0
+    fi
+
     log_info "Installing Java..."
 
     # Install OpenJDK (latest available for Raspbian)
@@ -273,7 +310,7 @@ install_java() {
     sudo apt-get install -y default-jdk
 
     # Also try to install OpenJDK 17 specifically if available
-    sudo apt-get install -y openjdk-17-jdk || log_warning "OpenJDK 17 not available, using default JDK"
+    sudo apt-get install -y openjdk-17-jdk 2>/dev/null || log_warning "OpenJDK 17 not available, using default JDK"
 
     log_success "Java installed"
 
@@ -346,6 +383,29 @@ EOF
 # 4. Install Docker, Docker Compose, and Portainer
 ###############################################################################
 install_docker() {
+    log_info "Checking Docker installation..."
+
+    # Check if Docker is already installed
+    if command -v docker &> /dev/null; then
+        DOCKER_VERSION=$(docker --version)
+        log_warning "Docker already installed: $DOCKER_VERSION"
+
+        # Still ensure user is in docker group
+        if groups "$USER" | grep -q '\bdocker\b'; then
+            log_warning "User already in docker group"
+        else
+            log_info "Adding current user to docker group..."
+            sudo usermod -aG docker "$USER"
+            log_success "User added to docker group (logout and login for changes to take effect)"
+        fi
+
+        # Ensure Docker service is enabled
+        sudo systemctl enable docker 2>/dev/null || true
+        sudo systemctl start docker 2>/dev/null || true
+
+        return 0
+    fi
+
     log_info "Installing Docker..."
 
     # Remove old versions if they exist
@@ -390,7 +450,7 @@ install_docker() {
 }
 
 install_docker_compose() {
-    log_info "Installing Docker Compose..."
+    log_info "Checking Docker Compose installation..."
 
     # Docker Compose is now included as a plugin with Docker
     # But we'll also install the standalone version for compatibility
@@ -398,12 +458,19 @@ install_docker_compose() {
     # Check if docker-compose plugin is available
     if docker compose version &> /dev/null; then
         COMPOSE_VERSION=$(docker compose version)
-        log_success "Docker Compose plugin already available: $COMPOSE_VERSION"
+        log_warning "Docker Compose plugin already available: $COMPOSE_VERSION"
+    fi
+
+    # Check if standalone docker-compose is already installed
+    if command -v docker-compose &> /dev/null && [ -f /usr/local/bin/docker-compose ]; then
+        COMPOSE_VERSION_OUTPUT=$(docker-compose --version)
+        log_warning "Docker Compose standalone already installed: $COMPOSE_VERSION_OUTPUT"
+        return 0
     fi
 
     # Install docker-compose-plugin
     log_info "Installing docker-compose-plugin..."
-    sudo apt-get install -y docker-compose-plugin || log_warning "docker-compose-plugin not available in repository"
+    sudo apt-get install -y docker-compose-plugin 2>/dev/null || log_warning "docker-compose-plugin not available in repository"
 
     # Install standalone docker-compose for backward compatibility
     log_info "Installing standalone docker-compose..."
@@ -444,6 +511,30 @@ install_docker_compose() {
 }
 
 install_portainer() {
+    log_info "Checking Portainer installation..."
+
+    # Check if Portainer is already running
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^portainer$'; then
+        log_warning "Portainer container already running"
+        IP_ADDR=$(hostname -I | awk '{print $1}')
+        log_info "Portainer is accessible at:"
+        echo "  • HTTP:  http://${IP_ADDR}:9000"
+        echo "  • HTTPS: https://${IP_ADDR}:9443"
+        return 0
+    fi
+
+    # Check if Portainer container exists but is stopped
+    if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^portainer$'; then
+        log_warning "Portainer container exists but is stopped. Starting it..."
+        docker start portainer
+        log_success "Portainer started"
+        IP_ADDR=$(hostname -I | awk '{print $1}')
+        log_info "Portainer is accessible at:"
+        echo "  • HTTP:  http://${IP_ADDR}:9000"
+        echo "  • HTTPS: https://${IP_ADDR}:9443"
+        return 0
+    fi
+
     log_info "Installing Portainer..."
 
     # Create directory for Portainer
@@ -453,6 +544,8 @@ install_portainer() {
     # Create docker-compose.yml for Portainer
     log_info "Creating Portainer docker-compose.yml..."
     cat > "$PORTAINER_DIR/docker-compose.yml" << 'EOF'
+version: '3.8'
+
 services:
   portainer:
     image: portainer/portainer-ce:latest
@@ -482,9 +575,9 @@ EOF
 
     # Use docker-compose or docker compose depending on what's available
     if docker compose version &> /dev/null; then
-        sudo docker compose up -d
+        docker compose up -d
     elif command -v docker-compose &> /dev/null; then
-        sudo docker-compose up -d
+        docker-compose up -d
     else
         log_error "Neither 'docker compose' nor 'docker-compose' is available"
         return 1
