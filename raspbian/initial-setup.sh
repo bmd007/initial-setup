@@ -6,9 +6,12 @@
 # - Updates and upgrades system packages
 # - Installs zsh and Oh My Zsh with themes
 # - Installs latest Java and configures environment
-# - Installs Docker, Docker Compose, and Portainer
+# - Configures network (Ethernet priority + WiFi failover)
+# - Installs Docker and Docker Compose
 #
-# Usage: ./initial-setup.sh [sudo_password]
+# Note: For Portainer installation, use setup-portainer.sh separately
+#
+# Usage: ./initial-setup.sh <sudo_password>
 # Example: ./initial-setup.sh MyPassword123
 ###############################################################################
 
@@ -47,72 +50,6 @@ run_sudo() {
     echo "$SUDO_PASSWORD" | sudo -S "$@" 2>/dev/null || sudo "$@"
 }
 
-# Check if port is in use and kill the process
-check_and_free_port() {
-    local port=$1
-    local port_name=$2
-
-    log_info "Checking if port $port is available..."
-
-    # Check if port is in use
-    if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
-        log_warning "Port $port is already in use by another process"
-
-        # Get process info
-        local pid
-        local process_name
-        pid=$(lsof -Pi :$port -sTCP:LISTEN -t 2>/dev/null | head -n 1)
-        process_name=$(ps -p $pid -o comm= 2>/dev/null || echo "unknown")
-
-        log_warning "Process using port $port: $process_name (PID: $pid)"
-
-        # Ask user if they want to kill the process
-        read -p "Kill process $process_name (PID: $pid) to free port $port for $port_name? (y/N): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            log_info "Killing process $pid..."
-            run_run_sudo kill -9 $pid 2>/dev/null || true
-            sleep 2
-
-            # Verify port is now free
-            if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
-                log_error "Failed to free port $port"
-                return 1
-            else
-                log_success "Port $port freed successfully"
-                return 0
-            fi
-        else
-            log_warning "Skipping port $port cleanup. $port_name may not work correctly."
-            return 1
-        fi
-    else
-        log_success "Port $port is available"
-        return 0
-    fi
-}
-
-# Check multiple ports
-check_required_ports() {
-    log_info "Checking required ports..."
-
-    local ports_ok=true
-
-    # Portainer ports
-    check_and_free_port 9000 "Portainer HTTP" || ports_ok=false
-    check_and_free_port 9443 "Portainer HTTPS" || ports_ok=false
-
-    # SSH (informational only, don't kill)
-    if lsof -Pi :22 -sTCP:LISTEN -t >/dev/null 2>&1; then
-        log_success "Port 22 (SSH) is active"
-    fi
-
-    if [ "$ports_ok" = false ]; then
-        log_warning "Some ports are still in use. Services may have conflicts."
-    else
-        log_success "All required ports are available"
-    fi
-}
 
 # Display network interface information
 display_network_info() {
@@ -728,93 +665,6 @@ install_docker_compose() {
     fi
 }
 
-install_portainer() {
-    log_info "Checking Portainer installation..."
-
-    # Check if Portainer is already running
-    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^portainer$'; then
-        log_warning "Portainer container already running"
-        IP_ADDR=$(hostname -I | awk '{print $1}')
-        log_info "Portainer is accessible at:"
-        echo "  • HTTP:  http://${IP_ADDR}:9000"
-        echo "  • HTTPS: https://${IP_ADDR}:9443"
-        return 0
-    fi
-
-    # Check if Portainer container exists but is stopped
-    if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^portainer$'; then
-        log_warning "Portainer container exists but is stopped. Starting it..."
-        docker start portainer
-        log_success "Portainer started"
-        IP_ADDR=$(hostname -I | awk '{print $1}')
-        log_info "Portainer is accessible at:"
-        echo "  • HTTP:  http://${IP_ADDR}:9000"
-        echo "  • HTTPS: https://${IP_ADDR}:9443"
-        return 0
-    fi
-
-    log_info "Installing Portainer..."
-
-    # Create directory for Portainer
-    PORTAINER_DIR="$HOME/portainer"
-    mkdir -p "$PORTAINER_DIR"
-
-    # Create docker-compose.yml for Portainer
-    log_info "Creating Portainer docker-compose.yml..."
-    cat > "$PORTAINER_DIR/docker-compose.yml" << 'EOF'
-version: '3.8'
-
-services:
-  portainer:
-    image: portainer/portainer-ce:latest
-    container_name: portainer
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    ports:
-      - "9000:9000"      # HTTP Web UI
-      - "9443:9443"      # HTTPS Web UI
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - portainer_data:/data
-    environment:
-      - TZ=UTC
-
-volumes:
-  portainer_data:
-    driver: local
-EOF
-
-    log_success "Portainer docker-compose.yml created at $PORTAINER_DIR"
-
-    # Start Portainer using docker-compose
-    log_info "Starting Portainer container..."
-    cd "$PORTAINER_DIR"
-
-    # Use docker-compose or docker compose depending on what's available
-    if docker compose version &> /dev/null; then
-        docker compose up -d
-    elif command -v docker-compose &> /dev/null; then
-        docker-compose up -d
-    else
-        log_error "Neither 'docker compose' nor 'docker-compose' is available"
-        return 1
-    fi
-
-    cd - > /dev/null
-
-    log_success "Portainer installed and started"
-
-    # Get the IP address
-    IP_ADDR=$(hostname -I | awk '{print $1}')
-
-    log_info "Portainer is accessible at:"
-    echo "  • HTTP:  http://${IP_ADDR}:9000"
-    echo "  • HTTPS: https://${IP_ADDR}:9443"
-    echo ""
-    log_info "Note: On first access, you'll need to create an admin account"
-    log_info "Portainer compose file location: $PORTAINER_DIR/docker-compose.yml"
-}
 
 ###############################################################################
 # Main Execution
@@ -888,16 +738,9 @@ main() {
     echo ""
 
     # 5. Install Docker
-    log_info "=== Step 5/5: Installing Docker, Docker Compose, and Portainer ==="
+    log_info "=== Step 5/5: Installing Docker and Docker Compose ==="
     install_docker
     install_docker_compose
-
-    # Check and free required ports before Portainer installation
-    echo ""
-    check_required_ports
-    echo ""
-
-    install_portainer
     echo ""
 
     # Summary
@@ -912,14 +755,15 @@ main() {
     echo "  • Java: $(java -version 2>&1 | head -n 1)"
     echo "  • Docker: $(docker --version)"
     echo "  • Docker Compose: $(docker-compose --version 2>/dev/null || echo 'plugin version')"
-    echo "  • Portainer: Installed and running"
     echo ""
     log_warning "Important notes:"
     echo "  1. Please log out and log back in for shell changes to take effect"
     echo "  2. Docker group membership requires re-login to take effect"
     echo "  3. Run 'p10k configure' to configure Powerlevel10k theme"
     echo "  4. JAVA_HOME is set to: $JAVA_HOME"
-    echo "  5. Portainer web UI: http://$(hostname -I | awk '{print $1}'):9000"
+    echo ""
+    log_info "To install Portainer (Docker management UI), run:"
+    echo "  ./setup-portainer.sh YourSudoPassword"
     echo ""
     log_info "You can now start using your configured Raspbian system!"
     echo ""

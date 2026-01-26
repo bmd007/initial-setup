@@ -35,7 +35,8 @@ logout
 | **Java (OpenJDK)** | Latest version with JAVA_HOME configured |
 | **Docker** | Latest from official installation script |
 | **Docker Compose** | Both plugin and standalone versions |
-| **Portainer CE** | Web UI for Docker management (port 9000) |
+
+**Note:** Portainer installation is now separate - use `setup-portainer.sh` after initial setup.
 
 ---
 
@@ -44,11 +45,8 @@ logout
 ### Network Display
 Shows all network interfaces and IP addresses at startup - know how to access your Pi!
 
-### Port Management
-Automatically checks if required ports (9000, 9443) are in use and offers to free them by killing conflicting processes.
-
 ### Password Parameter
-Optionally provide sudo password as argument to avoid repeated prompts during installation.
+Provide sudo password as argument to avoid repeated prompts during installation.
 
 ### Idempotent Design
 Run the script **multiple times safely**:
@@ -89,14 +87,14 @@ chmod +x initial-setup.sh
 
 # 4. After completion, log out and log back in
 logout
+
+# 5. (Optional) Install Portainer for Docker management UI
+chmod +x setup-portainer.sh
+./setup-portainer.sh YourSudoPassword
 ```
 
 **⚠️ Password Required:** You must provide your sudo password as the first argument.
 
-**Port Management:**
-- The script automatically checks if ports 9000 and 9443 are available
-- If a port is in use, you'll be asked if you want to kill the process
-- This ensures Portainer can start without conflicts
 
 ### Network Configuration
 
@@ -129,46 +127,53 @@ The script automatically configures **dual network support** with intelligent fa
    ```bash
    p10k configure
    ```
-3. **Access Portainer**: Open browser to `http://YOUR_PI_IP:9000`
-   - Create admin account on first access
-   - Select "Docker" environment
+3. **(Optional) Install Portainer**: Run `./setup-portainer.sh YourSudoPassword`
 
 ---
 
-## 🐳 Portainer Quick Guide
+## 🐳 Portainer Setup (Optional)
 
-### What is Portainer?
-Web-based UI for managing Docker containers, images, networks, and volumes. No CLI needed!
+Portainer is a web-based Docker management UI that makes container management easy.
 
-### Access
+### Install Portainer
+
+```bash
+# Run the Portainer setup script
+./setup-portainer.sh YourSudoPassword
+```
+
+### What It Does
+
+1. **Checks existing installation** - Detects running Portainer containers
+2. **Completely removes old setup** - Stops and removes containers/compose stacks
+3. **Frees required ports** - Automatically kills processes on ports 9000 and 9443
+4. **Deploys fresh instance** - Creates new Portainer container with docker-compose
+5. **Shows access URL** - Displays HTTP and HTTPS access links
+
+### Access Portainer
+
+After setup completes:
 - **HTTP**: `http://YOUR_PI_IP:9000`
 - **HTTPS**: `https://YOUR_PI_IP:9443`
 
-### Manage Portainer
-```bash
-# View status
-docker ps | grep portainer
+**⚠️ Important:** Create admin account within 5 minutes of first access!
 
-# Stop
+### Manage Portainer
+
+```bash
+# Stop Portainer
 cd ~/portainer && docker-compose down
 
-# Start
+# Start Portainer
 cd ~/portainer && docker-compose up -d
 
 # View logs
 docker logs portainer -f
 
-# Update to latest
-cd ~/portainer
-docker-compose pull
-docker-compose up -d
+# Reinstall/Reset Portainer
+./setup-portainer.sh YourSudoPassword
+# Answer 'y' when asked to remove data volume
 ```
-
-### Common Tasks
-- **Deploy container**: Portainer → Containers → Add container
-- **Deploy stack**: Portainer → Stacks → Add stack (paste docker-compose)
-- **View logs**: Click container → Logs
-- **Console access**: Click container → Console
 
 ---
 
@@ -232,16 +237,17 @@ cd ~/portainer
 docker-compose restart
 ```
 
-### Port Already in Use
+### Port Already in Use (for Portainer)
 ```bash
-# Check what's using port 9000
+# Portainer setup script handles this automatically
+./setup-portainer.sh YourPassword
+
+# Or check manually
 sudo lsof -i :9000
+sudo lsof -i :9443
 
 # Kill process manually
 sudo kill -9 <PID>
-
-# Or rerun the script - it will offer to free the port
-./initial-setup.sh YourPassword
 ```
 
 ### JAVA_HOME Not Set
@@ -353,7 +359,6 @@ nano ~/wifi-config.txt
 | Oh My Zsh | Installs | Skips (warns) |
 | Java | Installs | Skips (warns) |
 | Docker | Installs | Verifies, ensures user in group |
-| Portainer | Creates & starts | Checks status, starts if stopped |
 
 ---
 
@@ -362,9 +367,11 @@ nano ~/wifi-config.txt
 ```
 raspbian/
 ├── initial-setup.sh           Main installation script
+├── setup-portainer.sh         Portainer setup/management script (optional)
 ├── wifi-config.txt            WiFi credentials (edit before running)
-├── portainer-compose.yml      Portainer Docker Compose config
+├── portainer-compose.yml      Portainer Docker Compose config (reference)
 ├── test-network-info.sh       Network info test script
+├── NETWORK-CONFIG.md          Network configuration guide
 └── README.md                  This file
 ```
 
@@ -379,9 +386,11 @@ After running the script successfully:
 ✅ Java with JAVA_HOME configured system-wide
 ✅ Docker ready to use (after re-login)
 ✅ Docker Compose (both versions)
-✅ Portainer accessible at `http://YOUR_PI_IP:9000`
+✅ Network configured (Ethernet priority, WiFi backup)
 
 **Total setup time:** ~10-15 minutes (first run)
+
+**Optional:** Run `setup-portainer.sh` to add Docker web management UI
 
 ---
 
