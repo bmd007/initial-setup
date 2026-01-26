@@ -201,6 +201,20 @@ WebRTC Signaling:
 
 ## Recommendations
 
+### Quick Decision Guide 🎯
+
+**Which script should I use?**
+
+```
+Are you just checking if Conduit is working?
+    YES → Use check-conduit.sh (quick, one-time)
+    NO ↓
+
+Do you want to watch activity in real-time?
+    YES → Use conduit-monitor-adapted.sh (continuous)
+    NO → Use check-conduit.sh periodically
+```
+
 ### For Daily Use:
 **Use `conduit-monitor-adapted.sh`** ⭐
 - Run it in a screen/tmux session
@@ -257,6 +271,38 @@ tmux new -s conduit-monitor
 
 # Detach: Press Ctrl+B, then D
 # Reattach: tmux attach -t conduit-monitor
+```
+
+### Advanced: Run as systemd service (optional):
+```bash
+# Create service file
+sudo tee /etc/systemd/system/conduit-monitor.service > /dev/null <<EOF
+[Unit]
+Description=Conduit Monitor Service
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$HOME/raspbian
+ExecStart=$HOME/raspbian/conduit-monitor-adapted.sh 10
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Enable and start
+sudo systemctl daemon-reload
+sudo systemctl enable conduit-monitor
+sudo systemctl start conduit-monitor
+
+# View output
+sudo journalctl -u conduit-monitor -f
 ```
 
 ---
