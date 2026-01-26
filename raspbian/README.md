@@ -36,7 +36,7 @@ logout
 | **Docker** | Latest from official installation script |
 | **Docker Compose** | Both plugin and standalone versions |
 
-**Note:** Portainer installation is now separate - use `setup-portainer.sh` after initial setup.
+**Note:** Portainer and Conduit installations are separate - run their setup scripts after initial setup.
 
 ---
 
@@ -174,6 +174,67 @@ docker logs portainer -f
 ./setup-portainer.sh YourSudoPassword
 # Answer 'y' when asked to remove data volume
 ```
+
+---
+
+## 🔄 Conduit Setup (Optional)
+
+Conduit is Psiphon's load balancing and traffic management tool.
+
+### Install Conduit
+
+```bash
+# Run with default port (8080)
+./setup-conduit.sh YourSudoPassword
+
+# Or specify custom port
+./setup-conduit.sh YourSudoPassword 9090
+```
+
+### What It Does
+
+1. **Force opens port** - Automatically kills any process using the port
+2. **Validates Docker** - Ensures Docker is ready
+3. **Detects server IP** - Finds your public/local IP
+4. **Creates Docker Compose** - Sets up container configuration
+5. **Removes old installation** - Cleans up existing Conduit
+6. **Configures firewall** - Adds UFW rule if active
+7. **Starts Conduit** - Launches the service
+
+### Key Features
+
+- **Automatic port opening** - No manual intervention needed
+- **Forced process killing** - Clears port conflicts automatically
+- **Configurable workers** - Default: 3 workers
+- **Connection limit** - Default: 100 max connections
+- **Verbose logging** - Built-in monitoring
+
+### Access Conduit
+
+After setup completes:
+- **Default URL**: `http://YOUR_IP:8080`
+- **Custom Port**: `http://YOUR_IP:YOUR_PORT`
+
+### Manage Conduit
+
+```bash
+# View logs
+docker logs conduit -f
+
+# Stop
+cd ~/conduit && docker-compose down
+
+# Start
+cd ~/conduit && docker-compose up -d
+
+# Restart
+docker restart conduit
+
+# Check status
+docker ps | grep conduit
+```
+
+**📖 Full Guide**: See `CONDUIT-SETUP.md` for complete documentation
 
 ---
 
@@ -368,10 +429,12 @@ nano ~/wifi-config.txt
 raspbian/
 ├── initial-setup.sh           Main installation script
 ├── setup-portainer.sh         Portainer setup/management script (optional)
+├── setup-conduit.sh           Conduit load balancer script (optional)
 ├── wifi-config.txt            WiFi credentials (edit before running)
 ├── portainer-compose.yml      Portainer Docker Compose config (reference)
 ├── test-network-info.sh       Network info test script
 ├── NETWORK-CONFIG.md          Network configuration guide
+├── CONDUIT-SETUP.md           Conduit setup and management guide
 └── README.md                  This file
 ```
 
