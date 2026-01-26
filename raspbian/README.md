@@ -6,6 +6,12 @@ A comprehensive bash script to set up a fresh Raspbian (Raspberry Pi OS) install
 
 This script automates the following setup tasks:
 
+### 0. System Information Display
+- Displays hostname
+- Shows all network interfaces with their IP addresses (IPv4 and IPv6)
+- Helps identify how to connect to your Raspberry Pi
+- Useful for accessing services like Portainer
+
 ### 1. System Update & Upgrade
 - Updates package lists
 - Upgrades all installed packages
@@ -239,6 +245,7 @@ docker-compose up -d
 
 ## Script Behavior
 
+- ✅ Displays all network interfaces and IP addresses at startup
 - ✅ Safe to run multiple times (idempotent where possible)
 - ✅ Backs up existing `.zshrc` before modifications
 - ✅ Colored output for better readability
