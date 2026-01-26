@@ -7,10 +7,16 @@
 # - Installs zsh and Oh My Zsh with themes
 # - Installs latest Java and configures environment
 # - Installs Docker, Docker Compose, and Portainer
+#
+# Usage: ./initial-setup.sh [sudo_password]
+# Example: ./initial-setup.sh MyPassword123
 ###############################################################################
 
 # Note: Script is idempotent - safe to run multiple times
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
+# Global run_sudo password (if provided)
+SUDO_PASSWORD=""
 
 # Colors for output
 RED='\033[0;31m'
@@ -34,6 +40,78 @@ log_warning() {
 
 log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Sudo wrapper function
+run_sudo() {
+    echo "$SUDO_PASSWORD" | sudo -S "$@" 2>/dev/null || sudo "$@"
+}
+
+# Check if port is in use and kill the process
+check_and_free_port() {
+    local port=$1
+    local port_name=$2
+
+    log_info "Checking if port $port is available..."
+
+    # Check if port is in use
+    if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
+        log_warning "Port $port is already in use by another process"
+
+        # Get process info
+        local pid
+        local process_name
+        pid=$(lsof -Pi :$port -sTCP:LISTEN -t 2>/dev/null | head -n 1)
+        process_name=$(ps -p $pid -o comm= 2>/dev/null || echo "unknown")
+
+        log_warning "Process using port $port: $process_name (PID: $pid)"
+
+        # Ask user if they want to kill the process
+        read -p "Kill process $process_name (PID: $pid) to free port $port for $port_name? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            log_info "Killing process $pid..."
+            run_run_sudo kill -9 $pid 2>/dev/null || true
+            sleep 2
+
+            # Verify port is now free
+            if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
+                log_error "Failed to free port $port"
+                return 1
+            else
+                log_success "Port $port freed successfully"
+                return 0
+            fi
+        else
+            log_warning "Skipping port $port cleanup. $port_name may not work correctly."
+            return 1
+        fi
+    else
+        log_success "Port $port is available"
+        return 0
+    fi
+}
+
+# Check multiple ports
+check_required_ports() {
+    log_info "Checking required ports..."
+
+    local ports_ok=true
+
+    # Portainer ports
+    check_and_free_port 9000 "Portainer HTTP" || ports_ok=false
+    check_and_free_port 9443 "Portainer HTTPS" || ports_ok=false
+
+    # SSH (informational only, don't kill)
+    if lsof -Pi :22 -sTCP:LISTEN -t >/dev/null 2>&1; then
+        log_success "Port 22 (SSH) is active"
+    fi
+
+    if [ "$ports_ok" = false ]; then
+        log_warning "Some ports are still in use. Services may have conflicts."
+    else
+        log_success "All required ports are available"
+    fi
 }
 
 # Display network interface information
@@ -142,17 +220,17 @@ check_system() {
 update_system() {
     log_info "Starting system update and upgrade..."
 
-    sudo apt-get update -y
+    run_sudo apt-get update -y
     log_success "Package list updated"
 
-    sudo apt-get upgrade -y
+    run_sudo apt-get upgrade -y
     log_success "Packages upgraded"
 
-    sudo apt-get dist-upgrade -y
+    run_sudo apt-get dist-upgrade -y
     log_success "Distribution upgrade completed"
 
-    sudo apt-get autoremove -y
-    sudo apt-get autoclean -y
+    run_sudo apt-get autoremove -y
+    run_sudo apt-get autoclean -y
     log_success "Cleanup completed"
 }
 
@@ -167,7 +245,7 @@ install_zsh() {
         log_warning "zsh already installed: $(zsh --version)"
     else
         # Install zsh and dependencies
-        sudo apt-get install -y zsh git curl wget
+        run_sudo apt-get install -y zsh git curl wget
         log_success "zsh installed"
 
         # Verify installation
@@ -307,10 +385,10 @@ install_java() {
 
     # Install OpenJDK (latest available for Raspbian)
     # For Raspbian 64-bit, we'll install OpenJDK 17 (LTS) or the latest available
-    sudo apt-get install -y default-jdk
+    run_sudo apt-get install -y default-jdk
 
     # Also try to install OpenJDK 17 specifically if available
-    sudo apt-get install -y openjdk-17-jdk 2>/dev/null || log_warning "OpenJDK 17 not available, using default JDK"
+    run_sudo apt-get install -y openjdk-17-jdk 2>/dev/null || log_warning "OpenJDK 17 not available, using default JDK"
 
     log_success "Java installed"
 
@@ -354,9 +432,9 @@ EOF
     fi
 
     # Add to /etc/environment for system-wide access
-    if ! sudo grep -q "JAVA_HOME" /etc/environment; then
+    if ! run_sudo grep -q "JAVA_HOME" /etc/environment; then
         log_info "Adding JAVA_HOME to /etc/environment..."
-        echo "JAVA_HOME=\"$JAVA_HOME_PATH\"" | sudo tee -a /etc/environment > /dev/null
+        echo "JAVA_HOME=\"$JAVA_HOME_PATH\"" | run_sudo tee -a /etc/environment > /dev/null
         log_success "JAVA_HOME added to /etc/environment"
     else
         log_warning "JAVA_HOME already exists in /etc/environment"
@@ -364,12 +442,12 @@ EOF
 
     # Create/update /etc/profile.d/java.sh for system-wide PATH
     log_info "Creating /etc/profile.d/java.sh..."
-    sudo tee /etc/profile.d/java.sh > /dev/null << EOF
+    run_sudo tee /etc/profile.d/java.sh > /dev/null << EOF
 # Java Environment Variables
 export JAVA_HOME="$JAVA_HOME_PATH"
 export PATH="\$JAVA_HOME/bin:\$PATH"
 EOF
-    sudo chmod +x /etc/profile.d/java.sh
+    run_sudo chmod +x /etc/profile.d/java.sh
     log_success "Java environment configured system-wide"
 
     # Export for current session
@@ -380,7 +458,147 @@ EOF
 }
 
 ###############################################################################
-# 4. Install Docker, Docker Compose, and Portainer
+# 4. Configure Network (Ethernet Priority + WiFi Failover)
+###############################################################################
+configure_network_priority() {
+    log_info "Configuring network priority (Ethernet > WiFi)..."
+
+    # Create dhcpcd configuration to prioritize Ethernet over WiFi
+    run_sudo tee /etc/dhcpcd.conf.d/40-network-priority.conf > /dev/null << 'EOF'
+# Network Interface Priority Configuration
+# Ethernet (eth0) is preferred over WiFi (wlan0)
+
+# Set interface priority - lower metric = higher priority
+interface eth0
+metric 100
+
+interface wlan0
+metric 200
+EOF
+
+    log_success "Network priority configured (Ethernet preferred over WiFi)"
+}
+
+configure_wifi() {
+    log_info "Configuring WiFi connection..."
+
+    # Check if wifi-config.txt exists
+    WIFI_CONFIG_FILE="$HOME/wifi-config.txt"
+
+    if [ ! -f "$WIFI_CONFIG_FILE" ]; then
+        log_info "Creating WiFi configuration template..."
+        cat > "$WIFI_CONFIG_FILE" << 'EOF'
+# WiFi Configuration File
+# Edit this file with your WiFi credentials
+# Format: One WiFi network per line
+# SSID=YourNetworkName
+# PASSWORD=YourPassword
+#
+# Example:
+# SSID=MyHomeWiFi
+# PASSWORD=MySecurePassword123
+#
+# Multiple networks (will try in order):
+# SSID=HomeNetwork
+# PASSWORD=HomePass123
+# SSID=WorkNetwork
+# PASSWORD=WorkPass456
+
+SSID=
+PASSWORD=
+EOF
+        log_warning "WiFi config template created at: $WIFI_CONFIG_FILE"
+        log_info "Please edit $WIFI_CONFIG_FILE with your WiFi credentials"
+        log_info "Then run this script again to apply WiFi settings"
+        return 0
+    fi
+
+    # Read WiFi credentials from file
+    log_info "Reading WiFi credentials from $WIFI_CONFIG_FILE..."
+
+    # Parse the config file
+    SSID=$(grep -E "^SSID=" "$WIFI_CONFIG_FILE" | head -n 1 | cut -d'=' -f2-)
+    PASSWORD=$(grep -E "^PASSWORD=" "$WIFI_CONFIG_FILE" | head -n 1 | cut -d'=' -f2-)
+
+    # Check if credentials are provided
+    if [ -z "$SSID" ] || [ -z "$PASSWORD" ]; then
+        log_warning "WiFi SSID or PASSWORD not set in $WIFI_CONFIG_FILE"
+        log_info "Please edit the file and run the script again"
+        return 0
+    fi
+
+    log_info "Configuring WiFi: $SSID"
+
+    # Configure WiFi using wpa_supplicant
+    log_info "Setting up wpa_supplicant configuration..."
+
+    # Generate PSK hash for better security
+    PSK=$(wpa_passphrase "$SSID" "$PASSWORD" | grep -E "^\s+psk=" | cut -d'=' -f2)
+
+    # Create wpa_supplicant configuration
+    run_sudo tee -a /etc/wpa_supplicant/wpa_supplicant.conf > /dev/null << EOF
+
+# WiFi Network configured by initial-setup.sh on $(date)
+network={
+    ssid="$SSID"
+    psk=$PSK
+    priority=10
+    id_str="configured_by_script"
+}
+EOF
+
+    log_success "WiFi configured: $SSID"
+    log_info "WiFi will connect automatically if Ethernet is not available"
+
+    # Restart networking to apply changes
+    log_info "Restarting WiFi interface..."
+    run_sudo wpa_cli -i wlan0 reconfigure 2>/dev/null || true
+
+    # Check if WiFi connected
+    sleep 3
+    if ip addr show wlan0 | grep -q "inet "; then
+        WIFI_IP=$(ip addr show wlan0 | grep "inet " | awk '{print $2}' | cut -d'/' -f1)
+        log_success "WiFi connected! IP: $WIFI_IP"
+    else
+        log_info "WiFi configured but not currently connected (Ethernet may be active)"
+    fi
+}
+
+show_network_status() {
+    log_info "Current network status:"
+    echo ""
+
+    # Check Ethernet
+    if ip link show eth0 2>/dev/null | grep -q "state UP"; then
+        ETH_IP=$(ip addr show eth0 | grep "inet " | awk '{print $2}' | cut -d'/' -f1 2>/dev/null)
+        if [ -n "$ETH_IP" ]; then
+            echo -e "  ${GREEN}✓ Ethernet (eth0):${NC} Connected - $ETH_IP ${BLUE}[PRIMARY]${NC}"
+        else
+            echo -e "  ${YELLOW}○ Ethernet (eth0):${NC} Cable connected, waiting for IP"
+        fi
+    else
+        echo -e "  ${YELLOW}○ Ethernet (eth0):${NC} Not connected"
+    fi
+
+    # Check WiFi
+    if ip link show wlan0 2>/dev/null | grep -q "state UP"; then
+        WIFI_IP=$(ip addr show wlan0 | grep "inet " | awk '{print $2}' | cut -d'/' -f1 2>/dev/null)
+        WIFI_SSID=$(iwgetid -r 2>/dev/null)
+        if [ -n "$WIFI_IP" ]; then
+            echo -e "  ${GREEN}✓ WiFi (wlan0):${NC} Connected to '$WIFI_SSID' - $WIFI_IP ${BLUE}[BACKUP]${NC}"
+        else
+            echo -e "  ${YELLOW}○ WiFi (wlan0):${NC} Enabled, not connected"
+        fi
+    else
+        echo -e "  ${YELLOW}○ WiFi (wlan0):${NC} Not enabled"
+    fi
+
+    echo ""
+    log_info "Priority: Ethernet (metric 100) > WiFi (metric 200)"
+}
+
+###############################################################################
+# 5. Install Docker, Docker Compose, and Portainer
 ###############################################################################
 install_docker() {
     log_info "Checking Docker installation..."
@@ -395,13 +613,13 @@ install_docker() {
             log_warning "User already in docker group"
         else
             log_info "Adding current user to docker group..."
-            sudo usermod -aG docker "$USER"
+            run_sudo usermod -aG docker "$USER"
             log_success "User added to docker group (logout and login for changes to take effect)"
         fi
 
         # Ensure Docker service is enabled
-        sudo systemctl enable docker 2>/dev/null || true
-        sudo systemctl start docker 2>/dev/null || true
+        run_sudo systemctl enable docker 2>/dev/null || true
+        run_sudo systemctl start docker 2>/dev/null || true
 
         return 0
     fi
@@ -410,11 +628,11 @@ install_docker() {
 
     # Remove old versions if they exist
     log_info "Removing old Docker versions if present..."
-    sudo apt-get remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
+    run_sudo apt-get remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
 
     # Install prerequisites
     log_info "Installing Docker prerequisites..."
-    sudo apt-get install -y \
+    run_sudo apt-get install -y \
         ca-certificates \
         curl \
         gnupg \
@@ -423,7 +641,7 @@ install_docker() {
     # Download and run Docker installation script
     log_info "Downloading and running Docker installation script..."
     curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
-    sudo sh /tmp/get-docker.sh
+    run_sudo sh /tmp/get-docker.sh
     rm /tmp/get-docker.sh
 
     log_success "Docker installed"
@@ -439,13 +657,13 @@ install_docker() {
 
     # Add current user to docker group
     log_info "Adding current user to docker group..."
-    sudo usermod -aG docker "$USER"
+    run_sudo usermod -aG docker "$USER"
     log_success "User added to docker group (logout and login for changes to take effect)"
 
     # Enable Docker service
     log_info "Enabling Docker service..."
-    sudo systemctl enable docker
-    sudo systemctl start docker
+    run_sudo systemctl enable docker
+    run_sudo systemctl start docker
     log_success "Docker service enabled and started"
 }
 
@@ -470,7 +688,7 @@ install_docker_compose() {
 
     # Install docker-compose-plugin
     log_info "Installing docker-compose-plugin..."
-    sudo apt-get install -y docker-compose-plugin 2>/dev/null || log_warning "docker-compose-plugin not available in repository"
+    run_sudo apt-get install -y docker-compose-plugin 2>/dev/null || log_warning "docker-compose-plugin not available in repository"
 
     # Install standalone docker-compose for backward compatibility
     log_info "Installing standalone docker-compose..."
@@ -495,11 +713,11 @@ install_docker_compose() {
         COMPOSE_ARCH="$ARCH"
     fi
 
-    sudo curl -L "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-${COMPOSE_ARCH}" -o /usr/local/bin/docker-compose
-    sudo chmod +x /usr/local/bin/docker-compose
+    run_sudo curl -L "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-${COMPOSE_ARCH}" -o /usr/local/bin/docker-compose
+    run_sudo chmod +x /usr/local/bin/docker-compose
 
     # Create symbolic link
-    sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose || true
+    run_sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose || true
 
     log_success "Docker Compose installed"
 
@@ -608,12 +826,29 @@ main() {
     echo "=========================================="
     echo ""
 
+    # Check if password provided
+    if [ $# -eq 0 ]; then
+        log_error "Sudo password is required!"
+        log_info "Usage: ./initial-setup.sh <sudo_password>"
+        log_info "Example: ./initial-setup.sh MyPassword123"
+        exit 1
+    fi
+
+    SUDO_PASSWORD="$1"
+
     # Check if running as root
     if [ "$EUID" -eq 0 ]; then
         log_error "Please do not run this script as root or with sudo"
-        log_info "The script will request sudo privileges when needed"
+        log_info "Run as normal user with: ./initial-setup.sh <your_sudo_password>"
         exit 1
     fi
+
+    # Validate the password works
+    if ! echo "$SUDO_PASSWORD" | run_sudo -S true 2>/dev/null; then
+        log_error "Invalid sudo password provided"
+        exit 1
+    fi
+    log_success "Sudo password validated"
 
     # Display network information first
     display_network_info
@@ -621,20 +856,17 @@ main() {
     # System check
     check_system
 
-    # Update sudo timestamp
-    sudo -v
-
     echo ""
     log_info "Starting installation process..."
     echo ""
 
     # 1. Update system
-    log_info "=== Step 1/4: Updating System ==="
+    log_info "=== Step 1/5: Updating System ==="
     update_system
     echo ""
 
     # 2. Install zsh and Oh My Zsh
-    log_info "=== Step 2/4: Installing zsh and Oh My Zsh ==="
+    log_info "=== Step 2/5: Installing zsh and Oh My Zsh ==="
     install_zsh
     install_oh_my_zsh
     install_zsh_themes_and_plugins
@@ -643,15 +875,28 @@ main() {
     echo ""
 
     # 3. Install Java
-    log_info "=== Step 3/4: Installing Java ==="
+    log_info "=== Step 3/5: Installing Java ==="
     install_java
     configure_java_environment
     echo ""
 
-    # 4. Install Docker
-    log_info "=== Step 4/4: Installing Docker, Docker Compose, and Portainer ==="
+    # 4. Configure Network (Ethernet + WiFi)
+    log_info "=== Step 4/5: Configuring Network ==="
+    configure_network_priority
+    configure_wifi
+    show_network_status
+    echo ""
+
+    # 5. Install Docker
+    log_info "=== Step 5/5: Installing Docker, Docker Compose, and Portainer ==="
     install_docker
     install_docker_compose
+
+    # Check and free required ports before Portainer installation
+    echo ""
+    check_required_ports
+    echo ""
+
     install_portainer
     echo ""
 
@@ -680,5 +925,5 @@ main() {
     echo ""
 }
 
-# Run main function
-main
+# Run main function with command line arguments
+main "$@"

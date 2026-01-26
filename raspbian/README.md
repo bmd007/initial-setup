@@ -1,305 +1,398 @@
 # Raspbian Initial Setup Script
 
-A comprehensive bash script to set up a fresh Raspbian (Raspberry Pi OS) installation with all essential development tools.
+A comprehensive bash script to set up a fresh Raspbian (Raspberry Pi OS) installation with essential development tools.
 
-**✨ Key Feature: This script is fully idempotent - you can run it multiple times safely without any negative effects!**
+**✨ Fully idempotent - run it multiple times safely with no negative effects!**
 
-## Features
+---
 
-This script automates the following setup tasks:
+## 🚀 Quick Start
 
-### 0. System Information Display
-- Displays hostname
-- Shows all network interfaces with their IP addresses (IPv4 and IPv6)
-- Helps identify how to connect to your Raspberry Pi
-- Useful for accessing services like Portainer
+```bash
+# Make executable
+chmod +x initial-setup.sh
 
-### 1. System Update & Upgrade
-- Updates package lists
-- Upgrades all installed packages
-- Performs distribution upgrade
-- Cleans up unnecessary packages
+# Run with sudo password (REQUIRED)
+./initial-setup.sh YourSudoPassword
 
-### 2. Zsh & Oh My Zsh Installation
-- Installs zsh shell
-- Installs Oh My Zsh framework
-- Installs popular themes:
-  - **Powerlevel10k** - A fast, flexible, and feature-rich theme
-- Installs useful plugins:
-  - `git` - Git aliases and functions
-  - `docker` - Docker completion
-  - `docker-compose` - Docker Compose completion
-  - `zsh-autosuggestions` - Command suggestions based on history
-  - `zsh-syntax-highlighting` - Syntax highlighting for commands
-  - `zsh-completions` - Additional completion definitions
-- Sets zsh as the default shell
+# After completion, log out and back in
+logout
+```
 
-### 3. Java Installation & Configuration
-- Installs the latest OpenJDK available for Raspbian 64-bit
-- Configures `JAVA_HOME` environment variable
-- Updates `PATH` to include Java binaries
-- Adds configuration to:
-  - `~/.zshrc` (user-specific)
-  - `/etc/environment` (system-wide)
-  - `/etc/profile.d/java.sh` (system-wide PATH)
+**⚠️ Password Required:** The script requires your sudo password as an argument to avoid repeated prompts.
 
-### 4. Docker & Docker Compose Installation
-- Removes old Docker versions (if present)
-- Installs Docker using the official installation script from docker.com
-- Installs Docker Compose (both plugin and standalone versions)
-- Adds current user to the docker group
-- Enables Docker service to start on boot
+---
 
-### 5. Portainer Installation
-- Installs Portainer CE (Community Edition) via docker-compose
-- Creates a docker-compose.yml file in `~/portainer/`
-- Automatically starts Portainer container
-- Accessible via web browser on ports 9000 (HTTP) and 9443 (HTTPS)
-- Provides a user-friendly web UI for managing Docker containers, images, networks, and volumes
+## 📦 What Gets Installed
 
-## Prerequisites
 
-- Fresh Raspbian (Raspberry Pi OS) 64-bit installation
+| Component | Description |
+|-----------|-------------|
+| **System Updates** | Full system update and upgrade |
+| **Network Config** | Ethernet priority + WiFi failover (automatic) |
+| **zsh + Oh My Zsh** | Modern shell with Powerlevel10k theme |
+| **zsh Plugins** | autosuggestions, syntax-highlighting, completions |
+| **Java (OpenJDK)** | Latest version with JAVA_HOME configured |
+| **Docker** | Latest from official installation script |
+| **Docker Compose** | Both plugin and standalone versions |
+| **Portainer CE** | Web UI for Docker management (port 9000) |
+
+---
+
+## 🎯 Key Features
+
+### Network Display
+Shows all network interfaces and IP addresses at startup - know how to access your Pi!
+
+### Port Management
+Automatically checks if required ports (9000, 9443) are in use and offers to free them by killing conflicting processes.
+
+### Password Parameter
+Optionally provide sudo password as argument to avoid repeated prompts during installation.
+
+### Idempotent Design
+Run the script **multiple times safely**:
+- Already installed? Skips and shows warning
+- Interrupted? Picks up where it left off
+- Want to verify? Run again anytime
+- Timestamped backups (never overwrites)
+
+### What Happens on Reruns?
+```
+First run:  Installs everything (~10-15 min)
+Second run: Skips all, verifies everything (~2-3 min)
+```
+
+---
+
+## 📋 Usage
+
+### Prerequisites
+- Raspbian (Raspberry Pi OS) 64-bit
 - Internet connection
 - Non-root user with sudo privileges
 
-## Usage
+### Installation
 
-### 1. Download the script
-
-```bash
-# Clone the repository or download the script directly
-wget https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/raspbian/initial-setup.sh
-```
-
-Or if you have the repository:
+### Installation
 
 ```bash
-cd initial-setup/raspbian
-```
+# 1. (Optional) Configure WiFi first
+nano wifi-config.txt
+# Add your SSID and PASSWORD
 
-### 2. Make the script executable
-
-```bash
+# 2. Make executable
 chmod +x initial-setup.sh
+
+# 3. Run with sudo password (REQUIRED)
+./initial-setup.sh YourSudoPassword
+
+# 4. After completion, log out and log back in
+logout
 ```
 
-### 3. Run the script
+**⚠️ Password Required:** You must provide your sudo password as the first argument.
 
-```bash
-./initial-setup.sh
-```
+**Port Management:**
+- The script automatically checks if ports 9000 and 9443 are available
+- If a port is in use, you'll be asked if you want to kill the process
+- This ensures Portainer can start without conflicts
 
-**Important:** Do NOT run with `sudo`. The script will request sudo privileges when needed.
+### Network Configuration
 
-### 4. Post-installation steps
+The script automatically configures **dual network support** with intelligent failover:
 
-After the script completes:
+**Priority Order:**
+1. **Ethernet (eth0)** - Primary connection (metric 100)
+2. **WiFi (wlan0)** - Backup/fallback (metric 200)
 
-1. **Log out and log back in** for shell changes to take effect
-2. **Run Powerlevel10k configuration** (optional but recommended):
+**How it works:**
+- If Ethernet cable is connected → uses Ethernet (faster, more stable)
+- If Ethernet disconnected → automatically switches to WiFi
+- If Ethernet reconnected → switches back to Ethernet
+
+**WiFi Setup:**
+1. Edit `wifi-config.txt` with your WiFi credentials:
+   ```
+   SSID=YourNetworkName
+   PASSWORD=YourPassword
+   ```
+2. Run the script - WiFi will be configured automatically
+3. WiFi connects only when Ethernet is unavailable
+
+**Skip WiFi:** If you don't need WiFi, just run the script without editing `wifi-config.txt`
+
+### Post-Installation
+
+1. **Log out and back in** (for shell and Docker group changes)
+2. **Configure Powerlevel10k** (optional):
    ```bash
    p10k configure
    ```
-3. **Test Docker** (after re-login):
-   ```bash
-   docker run hello-world
-   ```
-4. **Access Portainer** in your web browser:
-   - Navigate to `http://YOUR_PI_IP:9000` (the script will show you the exact URL)
-   - Create an admin account on first access
-   - Select "Docker" as the environment to manage
+3. **Access Portainer**: Open browser to `http://YOUR_PI_IP:9000`
+   - Create admin account on first access
+   - Select "Docker" environment
 
-## What Gets Installed
+---
 
-| Software | Version | Notes |
-|----------|---------|-------|
-| zsh | Latest from apt | New default shell |
-| Oh My Zsh | Latest | With custom themes and plugins |
-| Java (OpenJDK) | Latest available (17+ on recent Raspbian) | With JAVA_HOME configured |
-| Docker | Latest from docker.com | Installed via official script |
-| Docker Compose | Latest | Both plugin and standalone |
-| Portainer CE | Latest | Docker management web UI |
+## 🐳 Portainer Quick Guide
 
-## Customization
+### What is Portainer?
+Web-based UI for managing Docker containers, images, networks, and volumes. No CLI needed!
 
-### Changing the zsh theme
+### Access
+- **HTTP**: `http://YOUR_PI_IP:9000`
+- **HTTPS**: `https://YOUR_PI_IP:9443`
 
-Edit `~/.zshrc` and change the `ZSH_THEME` line:
-
+### Manage Portainer
 ```bash
-ZSH_THEME="robbyrussell"  # or any other theme
-```
-
-Popular alternatives include:
-- `agnoster`
-- `robbyrussell` (default)
-- `af-magic`
-- `avit`
-
-### Adding more zsh plugins
-
-Edit `~/.zshrc` and add plugins to the `plugins` array:
-
-```bash
-plugins=(git docker docker-compose zsh-autosuggestions zsh-syntax-highlighting zsh-completions colored-man-pages sudo)
-```
-
-### Changing Java version
-
-To install a specific Java version:
-
-```bash
-sudo apt-cache search openjdk  # See available versions
-sudo apt-get install openjdk-17-jdk  # Install specific version
-sudo update-alternatives --config java  # Select default version
-```
-
-Then update JAVA_HOME in `~/.zshrc`.
-
-## Troubleshooting
-
-### Shell doesn't change to zsh
-
-If the shell doesn't change automatically:
-
-```bash
-chsh -s $(which zsh)
-```
-
-Then log out and log back in.
-
-### Docker permission denied
-
-If you get "permission denied" errors with Docker:
-
-```bash
-# Verify you're in the docker group
-groups
-
-# If not, add yourself
-sudo usermod -aG docker $USER
-
-# Log out and log back in
-```
-
-### JAVA_HOME not set
-
-If JAVA_HOME is not set after installation:
-
-```bash
-# For current session
-source ~/.zshrc
-
-# Or log out and log back in
-```
-
-### Oh My Zsh theme not loading
-
-```bash
-# Reload zsh configuration
-source ~/.zshrc
-
-# Or restart your terminal
-```
-
-### Portainer not accessible
-
-```bash
-# Check if Portainer is running
+# View status
 docker ps | grep portainer
 
-# View Portainer logs
-docker logs portainer
-
-# Restart Portainer
-cd ~/portainer
-docker-compose restart
-
-# Stop and remove Portainer
-cd ~/portainer
-docker-compose down
-
-# Start Portainer again
-cd ~/portainer
-docker-compose up -d
-```
-
-### Managing Portainer
-
-The Portainer configuration is stored in `~/portainer/docker-compose.yml`. You can:
-
-```bash
-# Stop Portainer
+# Stop
 cd ~/portainer && docker-compose down
 
-# Start Portainer
+# Start
 cd ~/portainer && docker-compose up -d
 
-# View Portainer logs
+# View logs
 docker logs portainer -f
 
-# Update Portainer to latest version
+# Update to latest
 cd ~/portainer
 docker-compose pull
 docker-compose up -d
 ```
 
-## Script Behavior
+### Common Tasks
+- **Deploy container**: Portainer → Containers → Add container
+- **Deploy stack**: Portainer → Stacks → Add stack (paste docker-compose)
+- **View logs**: Click container → Logs
+- **Console access**: Click container → Console
 
-### ✅ Fully Idempotent
-The script is designed to be **safe to run multiple times**. On subsequent runs:
-- **Already installed packages** are detected and skipped
-- **Existing configurations** are preserved (not overwritten)
-- **Running services** are detected and left running
-- **Backup files** use timestamps to avoid conflicts
-- **No duplicate entries** are added to configuration files
+---
 
-### ✅ Other Features
-- Displays all network interfaces and IP addresses at startup
-- Backs up existing `.zshrc` with timestamps before modifications
-- Colored output for better readability
-- Error handling with `set -euo pipefail`
-- Verification steps after each installation
-- Detailed logging of all operations
+## 🔧 Customization
 
-### What Happens on Multiple Runs?
+### Change zsh Theme
+Edit `~/.zshrc`:
+```bash
+ZSH_THEME="agnoster"  # or robbyrussell, af-magic, etc.
+```
 
+### Change Portainer Timezone
+Edit `~/portainer/docker-compose.yml`:
+```yaml
+environment:
+  - TZ=America/New_York  # Change from UTC
+```
+
+### Manage Java Version
+```bash
+# List available versions
+sudo apt-cache search openjdk
+
+# Install specific version
+sudo apt-get install openjdk-17-jdk
+
+# Select default
+sudo update-alternatives --config java
+```
+
+---
+
+## 🔍 Troubleshooting
+
+### Shell Not Changed
+```bash
+chsh -s $(which zsh)
+# Then log out and back in
+```
+
+### Docker Permission Denied
+```bash
+# Verify you're in docker group
+groups
+
+# If not, add yourself
+sudo usermod -aG docker $USER
+# Then log out and back in
+```
+
+### Portainer Not Accessible
+```bash
+# Check if running
+docker ps | grep portainer
+
+# Check logs
+docker logs portainer
+
+# Restart
+cd ~/portainer
+docker-compose restart
+```
+
+### Port Already in Use
+```bash
+# Check what's using port 9000
+sudo lsof -i :9000
+
+# Kill process manually
+sudo kill -9 <PID>
+
+# Or rerun the script - it will offer to free the port
+./initial-setup.sh YourPassword
+```
+
+### JAVA_HOME Not Set
+```bash
+# Reload shell configuration
+source ~/.zshrc
+# Or log out and back in
+```
+
+### Check Network Status
+```bash
+# View current connections
+ip addr show
+
+# Check which interface is active
+ip route show
+
+# Check WiFi connection
+iwgetid -r
+
+# Test connectivity
+ping -c 4 8.8.8.8
+```
+
+### WiFi Not Connecting
+```bash
+# Check WiFi interface
+sudo ifconfig wlan0 up
+
+# Check wpa_supplicant config
+sudo cat /etc/wpa_supplicant/wpa_supplicant.conf
+
+# Restart WiFi
+sudo wpa_cli -i wlan0 reconfigure
+
+# Check logs
+sudo journalctl -u wpa_supplicant -n 50
+```
+
+### Change Network Priority
+```bash
+# Edit priority file
+sudo nano /etc/dhcpcd.conf.d/40-network-priority.conf
+
+# Lower metric = higher priority
+# Ethernet: metric 100
+# WiFi: metric 200
+```
+
+---
+
+## 💡 Tips & Tricks
+
+### Network Display
+```bash
+# Just show network info (no installation)
+./test-network-info.sh
+```
+
+### Verify Installation
+```bash
+# Run script again - it will skip installed components
+./initial-setup.sh
+```
+
+### Check Network Status
+```bash
+# View all network interfaces and IPs
+./test-network-info.sh
+
+# Check active connection
+ip route | grep default
+
+# Show network metrics (priority)
+ip route show table all | grep metric
+```
+
+### Reconfigure WiFi
+```bash
+# Edit credentials
+nano ~/wifi-config.txt
+
+# Apply new settings
+./initial-setup.sh
+```
+
+### Update System
+```bash
+# Safe to rerun for system updates
+./initial-setup.sh
+```
+
+---
+
+## 📊 Script Behavior
+
+### Safety Features
+- ✅ **Idempotent** - Safe to run multiple times
+- ✅ **Timestamped backups** - Never overwrites (`.zshrc.backup.20260126_153045`)
+- ✅ **Smart detection** - Skips already installed components
+- ✅ **Clear logging** - Color-coded INFO/SUCCESS/WARNING/ERROR messages
+- ✅ **Error handling** - Stops on errors (`set -euo pipefail`)
+
+### On Multiple Runs
 | Component | First Run | Subsequent Runs |
 |-----------|-----------|-----------------|
-| System Updates | Full update/upgrade | Updates only if available |
-| zsh | Installs | Skips if already installed |
-| Oh My Zsh | Installs | Skips if directory exists |
-| Themes/Plugins | Clones repositories | Skips if already present |
-| Java | Installs | Skips if java command exists |
-| Docker | Full installation | Checks version, ensures user in group |
-| Docker Compose | Downloads binary | Skips if already at /usr/local/bin |
-| Portainer | Creates and starts | Checks if running, starts if stopped |
-| Config Files | Creates/modifies | Checks before modifying, skips duplicates |
+| System Updates | Full update | Updates if available |
+| zsh | Installs | Skips (warns) |
+| Oh My Zsh | Installs | Skips (warns) |
+| Java | Installs | Skips (warns) |
+| Docker | Installs | Verifies, ensures user in group |
+| Portainer | Creates & starts | Checks status, starts if stopped |
 
-**Result:** Running the script multiple times will update what needs updating and skip what's already configured, with clear messaging about what's being done.
+---
 
-## Security Notes
+## 📁 Files
 
-- The script uses official installation methods from trusted sources
-- Docker installation script is from `get.docker.com` (official Docker)
-- Oh My Zsh installation script is from the official GitHub repository
-- All packages are installed from official Raspbian/Debian repositories
+```
+raspbian/
+├── initial-setup.sh           Main installation script
+├── wifi-config.txt            WiFi credentials (edit before running)
+├── portainer-compose.yml      Portainer Docker Compose config
+├── test-network-info.sh       Network info test script
+└── README.md                  This file
+```
 
-## License
+---
 
-This script is provided as-is for personal use.
+## 🎯 What You Get
 
-## Contributing
+After running the script successfully:
 
-Feel free to submit issues or pull requests with improvements!
+✅ Updated Raspbian system
+✅ zsh as default shell with Powerlevel10k theme
+✅ Java with JAVA_HOME configured system-wide
+✅ Docker ready to use (after re-login)
+✅ Docker Compose (both versions)
+✅ Portainer accessible at `http://YOUR_PI_IP:9000`
 
-## Support
+**Total setup time:** ~10-15 minutes (first run)
 
-For Raspbian-specific issues, consult the [Raspberry Pi Documentation](https://www.raspberrypi.org/documentation/).
+---
 
-For tool-specific issues:
-- [Oh My Zsh](https://github.com/ohmyzsh/ohmyzsh)
-- [Powerlevel10k](https://github.com/romkatv/powerlevel10k)
-- [Docker Documentation](https://docs.docker.com/)
-- [OpenJDK](https://openjdk.org/)
+## 📝 Notes
+
+- Script requires **non-root user** with sudo privileges
+- **Log out and back in** after installation for changes to take effect
+- **Docker commands** require re-login (or run `newgrp docker`)
+- **Portainer URL** will be shown at the end of installation
+- **Safe to rerun** anytime - idempotent design ensures no negative effects
+
+---
+
+**Happy Raspberry Pi-ing! 🎉**

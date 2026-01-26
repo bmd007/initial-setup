@@ -1,0 +1,27 @@
+# WiFi Configuration File
+# Edit this file with your WiFi credentials before running initial-setup.sh
+# The script will automatically configure your Raspberry Pi to connect to this network
+#
+# Format:
+# SSID=YourNetworkName
+# PASSWORD=YourPassword
+#
+# Example:
+# SSID=MyHomeWiFi
+# PASSWORD=MySecurePassword123
+#
+# Multiple Networks (Priority order - first found will be used):
+# You can add multiple WiFi networks by repeating SSID/PASSWORD pairs
+# The Pi will try to connect in the order listed
+#
+# Network 1 (Home):
+# SSID=HomeNetwork
+# PASSWORD=HomePassword123
+#
+# Network 2 (Work):
+# SSID=WorkNetwork
+# PASSWORD=WorkPassword456
+
+# Enter your WiFi credentials below:
+SSID=
+PASSWORD=
