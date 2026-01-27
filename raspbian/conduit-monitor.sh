@@ -1,543 +1,304 @@
 #!/bin/bash
 
-###############################################################################
-# Conduit Real-Time Monitor
-# Adapted for actual Conduit behavior and log patterns
-#
-# Features:
-# - Shows broker communication status
-# - Tracks announcement cycles
-# - Monitors reputation building
-# - Displays actual connection events
-# - Real-time statistics
-#
-# Usage: ./conduit-monitor-adapted.sh [refresh_interval]
-# Example: ./conduit-monitor-adapted.sh 5  # Update every 5 seconds
-###############################################################################
+# Conduit Real-Time Monitor (Fixed Version)
+# Tracking Broker Communication & Activity
 
 set -euo pipefail
 
-# Configuration
-REFRESH_INTERVAL="${1:-5}"  # Default 5 seconds
-CONTAINER_NAME="conduit"
-LOG_LINES=2000
-
-# Colors for output
+# Color definitions
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-CYAN='\033[0;36m'
 MAGENTA='\033[0;35m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
-BOLD='\033[1m'
 
-# Stats file (temporary)
-STATS_FILE="/tmp/conduit-monitor-stats.txt"
-HISTORY_FILE="/tmp/conduit-monitor-history.txt"
+# Configuration
+CONTAINER_NAME="${CONTAINER_NAME:-conduit}"
+REFRESH_INTERVAL="${REFRESH_INTERVAL:-5}"
+LOG_LINES="${LOG_LINES:-15}"
+REPUTATION_TARGET=100
 
-# Logging functions
-log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
-}
-
-log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-# Get detailed Conduit statistics from real STATS logs
-get_conduit_stats() {
-    if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
-        return 1
+# Function to safely get numeric value with default
+get_numeric() {
+    local value="$1"
+    local default="${2:-0}"
+    
+    if [[ "$value" =~ ^[0-9]+$ ]]; then
+        echo "$value"
+    else
+        echo "$default"
     fi
-
-    local logs=$(docker logs "$CONTAINER_NAME" --tail $LOG_LINES 2>&1)
-
-    # Parse the latest STATS line
-    # Format: [STATS] Connecting: X | Connected: Y | Up: Z | Down: W | Uptime: T
-    local latest_stats=$(echo "$logs" | grep "\[STATS\]" | tail -1)
-
-    local connecting=0
-    local connected=0
-    local up_bytes=0
-    local down_bytes=0
-    local uptime="0s"
-
-    if [ -n "$latest_stats" ]; then
-        # Extract Connecting count
-        connecting=$(echo "$latest_stats" | grep -o "Connecting: [0-9]*" | grep -o "[0-9]*" || echo "0")
-
-        # Extract Connected count
-        connected=$(echo "$latest_stats" | grep -o "Connected: [0-9]*" | grep -o "[0-9]*" || echo "0")
-
-        # Extract upload (convert to bytes)
-        local up_raw=$(echo "$latest_stats" | grep -o "Up: [^|]*" | sed 's/Up: //' | xargs)
-        up_bytes=$(parse_bytes "$up_raw")
-
-        # Extract download (convert to bytes)
-        local down_raw=$(echo "$latest_stats" | grep -o "Down: [^|]*" | sed 's/Down: //' | xargs)
-        down_bytes=$(parse_bytes "$down_raw")
-
-        # Extract uptime
-        uptime=$(echo "$latest_stats" | grep -o "Uptime: [^|]*" | sed 's/Uptime: //' | xargs || echo "0s")
-    fi
-
-    # Check for connection status
-    local psiphon_connected=$(echo "$logs" | grep -c "\[OK\] Connected to Psiphon network" 2>/dev/null || echo "0")
-
-    # Count total STATS entries (activity indicator)
-    local stats_count=$(echo "$logs" | grep -c "\[STATS\]" 2>/dev/null || echo "0")
-
-    # Historical peak connections (from all STATS lines)
-    local peak_connecting=$(echo "$logs" | grep "\[STATS\]" | grep -o "Connecting: [0-9]*" | grep -o "[0-9]*" | sort -rn | head -1 || echo "0")
-    local peak_connected=$(echo "$logs" | grep "\[STATS\]" | grep -o "Connected: [0-9]*" | grep -o "[0-9]*" | sort -rn | head -1 || echo "0")
-
-    # Error tracking
-    local errors=$(echo "$logs" | grep -c "ERROR\|error" 2>/dev/null || echo "0")
-    local warnings=$(echo "$logs" | grep -c "WARN\|warning" 2>/dev/null || echo "0")
-    local fatals=$(echo "$logs" | grep -c "FATAL\|fatal\|panic" 2>/dev/null || echo "0")
-
-    echo "$connecting|$connected|$up_bytes|$down_bytes|$uptime|$psiphon_connected|$stats_count|$peak_connecting|$peak_connected|$errors|$warnings|$fatals"
 }
 
-# Parse bandwidth strings to bytes
-parse_bytes() {
-    local str="$1"
-
-    if [ -z "$str" ] || [ "$str" = "0 B" ]; then
-        echo "0"
-        return
-    fi
-
-    # Extract number and unit
-    local num=$(echo "$str" | grep -o "^[0-9.]*")
-    local unit=$(echo "$str" | grep -o "[A-Z]*B$")
-
-    if [ -z "$num" ]; then
-        echo "0"
-        return
-    fi
-
-    # Convert to bytes
-    case "$unit" in
-        "B")
-            echo "$num" | awk '{printf "%.0f", $1}'
-            ;;
-        "KB")
-            echo "$num" | awk '{printf "%.0f", $1 * 1024}'
-            ;;
-        "MB")
-            echo "$num" | awk '{printf "%.0f", $1 * 1024 * 1024}'
-            ;;
-        "GB")
-            echo "$num" | awk '{printf "%.0f", $1 * 1024 * 1024 * 1024}'
-            ;;
-        *)
-            echo "0"
-            ;;
+# Function to safely compare numeric values
+safe_compare() {
+    local val1="${1:-0}"
+    local val2="${2:-0}"
+    local operator="$3"
+    
+    # Ensure values are numeric
+    val1=$(get_numeric "$val1" 0)
+    val2=$(get_numeric "$val2" 0)
+    
+    case "$operator" in
+        "-gt") [[ "$val1" -gt "$val2" ]] ;;
+        "-ge") [[ "$val1" -ge "$val2" ]] ;;
+        "-lt") [[ "$val1" -lt "$val2" ]] ;;
+        "-le") [[ "$val1" -le "$val2" ]] ;;
+        "-eq") [[ "$val1" -eq "$val2" ]] ;;
+        "-ne") [[ "$val1" -ne "$val2" ]] ;;
+        *) return 1 ;;
     esac
 }
 
-# Calculate reputation score based on actual activity
+# Function to extract metrics from logs
+extract_metrics() {
+    local logs="$1"
+    
+    # Initialize all variables with defaults
+    connecting_clients=0
+    connected_clients=0
+    upload_mb=0
+    download_mb=0
+    uptime="0s"
+    error_count=0
+    warning_count=0
+    
+    # Extract values using grep and sed
+    if echo "$logs" | grep -q "Connecting:"; then
+        connecting_clients=$(echo "$logs" | grep -o "Connecting: [0-9]*" | tail -1 | grep -o "[0-9]*" | head -1)
+        connecting_clients=$(get_numeric "$connecting_clients" 0)
+    fi
+    
+    if echo "$logs" | grep -q "Connected:"; then
+        connected_clients=$(echo "$logs" | grep -o "Connected: [0-9]*" | tail -1 | grep -o "[0-9]*" | head -1)
+        connected_clients=$(get_numeric "$connected_clients" 0)
+    fi
+    
+    if echo "$logs" | grep -q "Up:"; then
+        upload_mb=$(echo "$logs" | grep -o "Up: [0-9.]*" | tail -1 | grep -o "[0-9.]*" | head -1)
+        upload_mb=$(get_numeric "${upload_mb%.*}" 0)
+    fi
+    
+    if echo "$logs" | grep -q "Down:"; then
+        download_mb=$(echo "$logs" | grep -o "Down: [0-9.]*" | tail -1 | grep -o "[0-9.]*" | head -1)
+        download_mb=$(get_numeric "${download_mb%.*}" 0)
+    fi
+    
+    if echo "$logs" | grep -q "Uptime:"; then
+        uptime=$(echo "$logs" | grep -o "Uptime: [^|]*" | tail -1 | sed 's/Uptime: //' | xargs)
+    fi
+    
+    # Count errors and warnings
+    error_count=$(echo "$logs" | grep -c "\[ERROR\]" || echo "0")
+    error_count=$(get_numeric "$error_count" 0)
+    
+    warning_count=$(echo "$logs" | grep -c "\[WARN\]" || echo "0")
+    warning_count=$(get_numeric "$warning_count" 0)
+}
+
+# Function to calculate estimated reputation
 calculate_reputation() {
-    local connecting=$1
-    local connected=$2
-    local up_bytes=$3
-    local down_bytes=$4
-    local peak_connecting=$5
-    local peak_connected=$6
-    local errors=$7
-
-    # Reputation factors:
-    # + connected clients (most important)
-    # + data transfer activity
-    # + peak connections reached
-    # + connecting attempts (shows you're being tried)
-    # - errors hurt reputation
-
-    local connected_score=$((connected * 20))
-    local peak_score=$((peak_connected * 10))
-    local connecting_score=$((connecting / 2))
-    local transfer_score=0
-
-    # Data transfer is a strong positive signal
-    if [ $down_bytes -gt 1048576 ]; then  # > 1MB
-        transfer_score=30
-    elif [ $down_bytes -gt 10240 ]; then  # > 10KB
-        transfer_score=15
-    elif [ $down_bytes -gt 0 ]; then
-        transfer_score=5
-    fi
-
-    local penalty=$((errors * 2))
-
-    local total=$((connected_score + peak_score + connecting_score + transfer_score - penalty))
-
-    # Normalize to 0-100
-    if [ $total -lt 0 ]; then
-        echo "0"
-    elif [ $total -gt 100 ]; then
-        echo "100"
-    else
-        echo "$total"
-    fi
-}
-
-# Determine node status based on actual activity
-get_node_status() {
-    local connecting=$1
-    local connected=$2
-    local up_bytes=$3
-    local down_bytes=$4
-    local psiphon_connected=$5
-    local errors=$6
-
-    # Determine status based on actual activity
-    if [ $connected -gt 0 ]; then
-        if [ $down_bytes -gt 10240 ]; then  # > 10KB transferred
-            echo "ACTIVE|Actively serving $connected client(s) - transferring data!"
+    local connected="$1"
+    local upload="$2"
+    
+    connected=$(get_numeric "$connected" 0)
+    upload=$(get_numeric "$upload" 0)
+    
+    # Simple reputation estimation
+    local rep=0
+    
+    # Reputation based on connections (max 50 points)
+    if safe_compare "$connected" 0 "-gt"; then
+        if safe_compare "$connected" 100 "-ge"; then
+            rep=50
         else
-            echo "CONNECTED|$connected client(s) connected, establishing data flow"
+            rep=$((connected / 2))
         fi
-    elif [ $connecting -gt 0 ]; then
-        echo "CONNECTING|$connecting client(s) connecting - waiting for handshake"
-    elif [ $psiphon_connected -gt 0 ]; then
-        echo "READY|Connected to Psiphon - waiting for clients"
-    elif [ $errors -gt 10 ]; then
-        echo "ERROR|Experiencing errors, check logs"
+    fi
+    
+    # Reputation based on upload (max 50 points)
+    if safe_compare "$upload" 0 "-gt"; then
+        if safe_compare "$upload" 100 "-ge"; then
+            rep=$((rep + 50))
+        else
+            rep=$((rep + upload / 2))
+        fi
+    fi
+    
+    echo "$rep"
+}
+
+# Function to get status indicator
+get_status() {
+    local connected="$1"
+    local error_count="$2"
+    
+    connected=$(get_numeric "$connected" 0)
+    error_count=$(get_numeric "$error_count" 0)
+    
+    if safe_compare "$connected" 0 "-gt"; then
+        echo -e "${GREEN}● ACTIVE${NC}"
+    elif safe_compare "$error_count" 10 "-gt"; then
+        echo -e "${RED}● ERROR${NC}"
     else
-        echo "STARTING|Initializing connection to Psiphon network"
+        echo -e "${YELLOW}● STARTING${NC}"
     fi
 }
 
-# Display header
-show_header() {
+# Function to display the dashboard
+display_dashboard() {
     clear
-    echo -e "${BOLD}${CYAN}╔════════════════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BOLD}${CYAN}║${NC}                  ${BOLD}Conduit Real-Time Monitor${NC}                            ${BOLD}${CYAN}║${NC}"
-    echo -e "${BOLD}${CYAN}║${NC}              ${BLUE}Tracking Broker Communication & Activity${NC}                    ${BOLD}${CYAN}║${NC}"
-    echo -e "${BOLD}${CYAN}╚════════════════════════════════════════════════════════════════════════════╝${NC}"
+    
+    # Check if container is running
+    if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+        echo -e "${RED}Container '${CONTAINER_NAME}' is not running!${NC}"
+        echo "Press Ctrl+C to exit"
+        return 1
+    fi
+    
+    # Get container info
+    local container_id=$(docker ps -qf "name=^${CONTAINER_NAME}$")
+    local image=$(docker inspect -f '{{.Config.Image}}' "$container_id" 2>/dev/null || echo "unknown")
+    local started=$(docker inspect -f '{{.State.StartedAt}}' "$container_id" 2>/dev/null | cut -d'.' -f1 || echo "unknown")
+    
+    # Get recent logs
+    local logs=$(docker logs "$CONTAINER_NAME" --tail 100 2>&1)
+    
+    # Extract metrics
+    extract_metrics "$logs"
+    
+    # Calculate reputation
+    local reputation=$(calculate_reputation "$connected_clients" "$upload_mb")
+    local reputation_percent=$((reputation * 100 / REPUTATION_TARGET))
+    if safe_compare "$reputation_percent" 100 "-gt"; then
+        reputation_percent=100
+    fi
+    
+    # Get status
+    local status=$(get_status "$connected_clients" "$error_count")
+    
+    # Header
+    echo -e "${CYAN}╔════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║${NC}              ${BLUE}Conduit Real-Time Monitor${NC}                         ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}          ${MAGENTA}Tracking Broker Communication & Activity${NC}             ${CYAN}║${NC}"
+    echo -e "${CYAN}╚════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
+    
+    # Container info
     echo -e "${BLUE}Container:${NC} $CONTAINER_NAME"
     echo -e "${BLUE}Refresh:${NC} Every ${REFRESH_INTERVAL}s | ${BLUE}Press Ctrl+C to exit${NC}"
     echo -e "${BLUE}Time:${NC} $(date '+%Y-%m-%d %H:%M:%S')"
-
-    # Get uptime
-    if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
-        local started=$(docker inspect -f '{{.State.StartedAt}}' conduit 2>/dev/null | cut -d'.' -f1)
-        local uptime=$(docker inspect -f '{{.State.StartedAt}}' conduit 2>/dev/null)
-        if [ -n "$started" ]; then
-            echo -e "${BLUE}Uptime:${NC} Started at $started"
-        fi
-    fi
+    echo -e "${BLUE}Uptime:${NC} Started at $started"
     echo ""
-}
-
-# Display node status dashboard
-show_node_status() {
-    local stats=$1
-    IFS='|' read -r connecting connected up_bytes down_bytes uptime psiphon_connected stats_count peak_connecting peak_connected errors warnings fatals <<< "$stats"
-
-    # Get status
-    local status_info=$(get_node_status "$connecting" "$connected" "$up_bytes" "$down_bytes" "$psiphon_connected" "$errors")
-    local status=$(echo "$status_info" | cut -d'|' -f1)
-    local status_desc=$(echo "$status_info" | cut -d'|' -f2)
-
-    # Calculate reputation
-    local reputation=$(calculate_reputation "$connecting" "$connected" "$up_bytes" "$down_bytes" "$peak_connecting" "$peak_connected" "$errors")
-
-    echo -e "${BOLD}${MAGENTA}═══ Node Status ═══${NC}"
-
-    # Status with color coding
-    case $status in
-        "ACTIVE")
-            echo -e "${BOLD}Status:${NC} ${GREEN}${BOLD}● $status${NC}"
-            echo -e "${GREEN}$status_desc${NC}"
-            ;;
-        "CONNECTED")
-            echo -e "${BOLD}Status:${NC} ${CYAN}${BOLD}● $status${NC}"
-            echo -e "${CYAN}$status_desc${NC}"
-            ;;
-        "CONNECTING")
-            echo -e "${BOLD}Status:${NC} ${YELLOW}${BOLD}● $status${NC}"
-            echo -e "${YELLOW}$status_desc${NC}"
-            ;;
-        "READY")
-            echo -e "${BOLD}Status:${NC} ${BLUE}${BOLD}● $status${NC}"
-            echo -e "${BLUE}$status_desc${NC}"
-            ;;
-        "ERROR")
-            echo -e "${BOLD}Status:${NC} ${RED}${BOLD}● $status${NC}"
-            echo -e "${RED}$status_desc${NC}"
-            ;;
-        *)
-            echo -e "${BOLD}Status:${NC} ${BLUE}${BOLD}● $status${NC}"
-            echo -e "${BLUE}$status_desc${NC}"
-            ;;
-    esac
-
-    # Reputation bar
+    
+    # Node Status
+    echo -e "${MAGENTA}━━━━ Node Status ━━━━${NC}"
+    echo -e "${BLUE}Status:${NC} $status"
+    echo -e "${BLUE}Initializing connection to Psiphon network${NC}"
     echo ""
-    echo -e "${BOLD}Estimated Reputation:${NC}"
-    local bar_length=$((reputation / 5))
-    local bar=$(printf '█%.0s' $(seq 1 $bar_length))
-    local empty=$(printf '░%.0s' $(seq 1 $((20 - bar_length))))
-
-    if [ $reputation -ge 70 ]; then
-        echo -e "${GREEN}${bar}${NC}${empty} ${BOLD}${reputation}%${NC} ${GREEN}(Excellent)${NC}"
-    elif [ $reputation -ge 40 ]; then
-        echo -e "${YELLOW}${bar}${NC}${empty} ${BOLD}${reputation}%${NC} ${YELLOW}(Building)${NC}"
-    else
-        echo -e "${RED}${bar}${NC}${empty} ${BOLD}${reputation}%${NC} ${RED}(Starting)${NC}"
+    
+    # Estimated Reputation
+    local bar_length=40
+    local filled_length=$((reputation_percent * bar_length / 100))
+    local bar=""
+    for ((i=0; i<filled_length; i++)); do bar="${bar}█"; done
+    for ((i=filled_length; i<bar_length; i++)); do bar="${bar}░"; done
+    
+    local rep_color=$GREEN
+    if safe_compare "$reputation_percent" 30 "-lt"; then
+        rep_color=$RED
+    elif safe_compare "$reputation_percent" 70 "-lt"; then
+        rep_color=$YELLOW
     fi
-
-    # Show uptime from STATS
-    if [ -n "$uptime" ] && [ "$uptime" != "0s" ]; then
-        echo -e "${CYAN}●${NC} Conduit Uptime: ${BOLD}$uptime${NC}"
-    fi
+    
+    echo -e "${BLUE}Estimated Reputation:${NC}"
+    echo -e "${rep_color}${bar}${NC} ${reputation_percent}% ${YELLOW}(Starting)${NC}"
     echo ""
-}
-
-# Display broker communication statistics
-show_connection_stats() {
-    local stats=$1
-    IFS='|' read -r connecting connected up_bytes down_bytes uptime psiphon_connected stats_count peak_connecting peak_connected errors warnings fatals <<< "$stats"
-
-    echo -e "${BOLD}${MAGENTA}═══ Connection Statistics ═══${NC}"
-
-    # Psiphon connection status
-    if [ $psiphon_connected -gt 0 ]; then
-        echo -e "${GREEN}${BOLD}✓ CONNECTED TO PSIPHON NETWORK${NC}"
-        echo ""
-    else
-        echo -e "${YELLOW}${BOLD}⚠ CONNECTING TO PSIPHON NETWORK${NC}"
-        echo ""
+    
+    # Connection Statistics
+    echo -e "${MAGENTA}━━━━ Connection Statistics ━━━━${NC}"
+    
+    local status_indicator=$YELLOW
+    if safe_compare "$connected_clients" 0 "-gt"; then
+        status_indicator=$GREEN
     fi
-
-    # Current connections
-    echo -e "${BOLD}Current:${NC}"
-    echo -e "${CYAN}●${NC} Connecting clients:     ${BOLD}$connecting${NC}"
-    echo -e "${GREEN}●${NC} Connected clients:      ${BOLD}$connected${NC}"
-
-    # Peak connections
-    if [ $peak_connecting -gt 0 ] || [ $peak_connected -gt 0 ]; then
-        echo ""
-        echo -e "${BOLD}Peak (this session):${NC}"
-        echo -e "${CYAN}●${NC} Peak connecting:        ${BOLD}$peak_connecting${NC}"
-        echo -e "${GREEN}●${NC} Peak connected:         ${BOLD}$peak_connected${NC}"
-    fi
-
-    # Data transfer
-    if [ $up_bytes -gt 0 ] || [ $down_bytes -gt 0 ]; then
-        echo ""
-        echo -e "${BOLD}Data Transfer:${NC}"
-        # Format bytes with fallback if numfmt not available
-        local up_formatted=$(numfmt --to=iec-i --suffix=B $up_bytes 2>/dev/null || echo "${up_bytes}B")
-        local down_formatted=$(numfmt --to=iec-i --suffix=B $down_bytes 2>/dev/null || echo "${down_bytes}B")
-        echo -e "${GREEN}●${NC} Uploaded:               ${BOLD}${up_formatted}${NC}"
-        echo -e "${GREEN}●${NC} Downloaded:             ${BOLD}${down_formatted}${NC}"
-
-        # Show if actively transferring data
-        if [ $down_bytes -gt 10240 ]; then
-            echo ""
-            echo -e "${GREEN}${BOLD}✓ ACTIVELY TRANSFERRING DATA${NC}"
-            echo -e "${GREEN}  Your node is helping users bypass censorship!${NC}"
-        fi
-    fi
-
-    # STATS activity indicator
-    if [ $stats_count -gt 0 ]; then
-        echo ""
-        echo -e "${BLUE}●${NC} Stats updates:          ${BOLD}$stats_count${NC} (activity indicator)"
-    fi
-
+    
+    echo -e "${BLUE}⚡ CONNECTING TO PSIPHON NETWORK${NC}"
     echo ""
-}
-
-# Display error summary
-show_error_summary() {
-    local stats=$1
-    IFS='|' read -r connecting connected up_bytes down_bytes uptime psiphon_connected stats_count peak_connecting peak_connected errors warnings fatals <<< "$stats"
-
-    echo -e "${BOLD}${MAGENTA}═══ Health Summary ═══${NC}"
-
-    if [ $fatals -gt 0 ]; then
-        echo -e "${RED}${BOLD}✗ CRITICAL ERRORS: $fatals${NC}"
-        echo -e "${RED}  Check logs immediately!${NC}"
-    elif [ $errors -gt 20 ]; then
-        echo -e "${RED}●${NC} Errors:   ${BOLD}${RED}$errors${NC} ${RED}(High - investigate)${NC}"
-    elif [ $errors -gt 0 ]; then
-        echo -e "${YELLOW}●${NC} Errors:   ${BOLD}$errors${NC} ${YELLOW}(Some errors normal)${NC}"
-    else
-        echo -e "${GREEN}●${NC} Errors:   ${BOLD}$errors${NC} ${GREEN}(None)${NC}"
-    fi
-
-    if [ $warnings -gt 50 ]; then
-        echo -e "${YELLOW}●${NC} Warnings: ${BOLD}$warnings${NC} ${YELLOW}(High)${NC}"
-    else
-        echo -e "${BLUE}●${NC} Warnings: ${BOLD}$warnings${NC}"
-    fi
-
+    echo -e "${BLUE}Current:${NC}"
+    echo -e "  ${status_indicator}●${NC} Connecting clients:    ${connecting_clients}"
+    echo -e "  ${status_indicator}●${NC} Connected clients:     ${connected_clients}"
     echo ""
-}
-
-# Show recent log events with smart filtering
-show_recent_events() {
-    echo -e "${BOLD}${MAGENTA}═══ Recent Events (Last 15 Lines) ═══${NC}"
-
-    if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
-        docker logs "$CONTAINER_NAME" --tail 15 2>&1 | while IFS= read -r line; do
-            # Color code based on content
-            if echo "$line" | grep -qi "fatal\|panic"; then
-                echo -e "${RED}${BOLD}[FATAL]${NC} ${RED}${line}${NC}"
-            elif echo "$line" | grep -qi "error"; then
-                echo -e "${RED}[ERROR]${NC} ${line}"
-            elif echo "$line" | grep -qi "warn"; then
-                echo -e "${YELLOW}[WARN]${NC} ${line}"
-            elif echo "$line" | grep -qi "\[STATS\]"; then
-                # Highlight STATS lines in cyan
-                echo -e "${CYAN}[STATS]${NC} ${line}"
-            elif echo "$line" | grep -qi "\[OK\] Connected to Psiphon"; then
-                echo -e "${GREEN}${BOLD}[OK]${NC} ${GREEN}${line}${NC}"
-            elif echo "$line" | grep -qi "Starting.*Conduit"; then
-                echo -e "${BLUE}[START]${NC} ${line}"
+    
+    # Health Summary
+    echo -e "${MAGENTA}━━━━ Health Summary ━━━━${NC}"
+    
+    local error_indicator=$GREEN
+    if safe_compare "$error_count" 0 "-gt"; then
+        error_indicator=$YELLOW
+    fi
+    
+    echo -e "  ${error_indicator}●${NC} Errors:    ${YELLOW}(None)${NC}"
+    echo -e "  ${GREEN}●${NC} Warnings:"
+    echo ""
+    
+    # Trend Analysis
+    echo -e "${MAGENTA}━━━━ Trend Analysis ━━━━${NC}"
+    echo ""
+    echo -e "${MAGENTA}━━━━ Recent Events (Last ${LOG_LINES} Lines) ━━━━${NC}"
+    
+    # Display recent events with color coding
+    local recent_logs=$(echo "$logs" | tail -n "$LOG_LINES")
+    
+    while IFS= read -r line; do
+        if [[ "$line" =~ \[ERROR\] ]]; then
+            # Check if it's a "safe" error (limited/no match)
+            if [[ "$line" =~ "limited" ]] || [[ "$line" =~ "no match" ]]; then
+                echo -e "${YELLOW}[INFO]${NC} ${line#*\[ERROR\]}"
             else
-                echo -e "${NC}${line}"
+                echo -e "${RED}[ERROR]${NC} ${line#*\[ERROR\]}"
             fi
-        done
-    fi
+        elif [[ "$line" =~ \[WARN\] ]]; then
+            echo -e "${YELLOW}[WARN]${NC} ${line#*\[WARN\]}"
+        elif [[ "$line" =~ \[STATS\] ]]; then
+            echo -e "${GREEN}[STATS]${NC} ${line#*\[STATS\]}"
+        else
+            echo "$line"
+        fi
+    done <<< "$recent_logs"
+    
+    echo ""
+    echo -e "${MAGENTA}━━━━ Tips ━━━━${NC}"
+    echo -e "${CYAN}💡 'limited' and 'no match' messages are normal - they mean your node is"
+    echo -e "   properly announcing itself to the broker but no clients need connections yet.${NC}"
     echo ""
 }
 
-# Track historical trends
-update_history() {
-    local stats=$1
-    local timestamp=$(date +%s)
+# Main loop
+echo -e "${BLUE}Starting Conduit Real-Time Monitor...${NC}"
+echo -e "${BLUE}Monitoring container: ${CONTAINER_NAME}${NC}"
+echo ""
 
-    echo "$timestamp|$stats" >> "$HISTORY_FILE"
+# Check if docker is available
+if ! command -v docker &> /dev/null; then
+    echo -e "${RED}Error: Docker is not installed or not in PATH${NC}"
+    exit 1
+fi
 
-    # Keep only last 1000 entries
-    tail -1000 "$HISTORY_FILE" > "${HISTORY_FILE}.tmp" 2>/dev/null || true
-    mv "${HISTORY_FILE}.tmp" "$HISTORY_FILE" 2>/dev/null || true
-}
+# Check if container exists
+if ! docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+    echo -e "${RED}Error: Container '${CONTAINER_NAME}' does not exist${NC}"
+    exit 1
+fi
 
-# Show trend analysis
-show_trends() {
-    if [ ! -f "$HISTORY_FILE" ]; then
-        return
-    fi
-
-    local entries=$(wc -l < "$HISTORY_FILE")
-    if [ $entries -lt 10 ]; then
-        return
-    fi
-
-    echo -e "${BOLD}${MAGENTA}═══ Trend Analysis ═══${NC}"
-
-    # Get first and last entry
-    local first=$(head -1 "$HISTORY_FILE")
-    local last=$(tail -1 "$HISTORY_FILE")
-
-    # Parse connecting from first and last (field 2)
-    local first_connecting=$(echo "$first" | cut -d'|' -f2)
-    local last_connecting=$(echo "$last" | cut -d'|' -f2)
-    local connecting_change=$((last_connecting - first_connecting))
-
-    # Parse connected from first and last (field 3)
-    local first_connected=$(echo "$first" | cut -d'|' -f3)
-    local last_connected=$(echo "$last" | cut -d'|' -f3)
-    local connected_change=$((last_connected - first_connected))
-
-    # Parse down_bytes from first and last (field 5)
-    local first_down=$(echo "$first" | cut -d'|' -f5)
-    local last_down=$(echo "$last" | cut -d'|' -f5)
-    local down_change=$((last_down - first_down))
-
-    if [ $connected_change -gt 0 ]; then
-        echo -e "${GREEN}●${NC} Connected clients increased: ${GREEN}${BOLD}+$connected_change${NC}"
-    fi
-
-    if [ $connecting_change -gt 0 ]; then
-        echo -e "${CYAN}●${NC} Connecting clients increased: ${CYAN}${BOLD}+$connecting_change${NC}"
-    fi
-
-    if [ $down_change -gt 10240 ]; then  # > 10KB
-        local down_formatted=$(numfmt --to=iec-i --suffix=B $down_change 2>/dev/null || echo "${down_change}B")
-        echo -e "${GREEN}●${NC} Data transferred: ${GREEN}${BOLD}+$down_formatted${NC}"
-    fi
-
-    if [ $connected_change -eq 0 ] && [ $down_change -eq 0 ]; then
-        echo -e "${YELLOW}●${NC} Waiting for first connections..."
-        echo -e "${YELLOW}  Keep your node running to build reputation${NC}"
-    fi
-
-    echo ""
-}
+# Trap Ctrl+C for clean exit
+trap 'echo -e "\n${BLUE}Stopping monitor...${NC}"; exit 0' INT TERM
 
 # Main monitoring loop
-monitor_loop() {
-    # Clean up old files
-    rm -f "$STATS_FILE"
-
-    log_info "Starting Conduit Real-Time Monitor..."
-    log_info "Analyzing Conduit-specific logs and behavior..."
-    sleep 2
-
-    while true; do
-        # Display header
-        show_header
-
-        # Get and display statistics
-        local stats=$(get_conduit_stats)
-        if [ -n "$stats" ]; then
-            show_node_status "$stats"
-            show_connection_stats "$stats"
-            show_error_summary "$stats"
-            update_history "$stats"
-            show_trends
-        fi
-
-        # Show recent events
-        show_recent_events
-
-        # Helpful tips at the bottom
-        echo -e "${BOLD}${BLUE}═══ Tips ═══${NC}"
-        echo -e "${BLUE}●${NC} Monitor the ${CYAN}[STATS]${NC} lines to see real-time activity"
-        echo -e "${BLUE}●${NC} ${GREEN}Connected > 0${NC} means users are being helped right now!"
-        echo -e "${BLUE}●${NC} It can take hours or days before your first client connection"
-        echo -e "${BLUE}●${NC} Keep your node running 24/7 to build reputation"
-        echo -e "${BLUE}●${NC} High uptime = better reputation = more connections"
-
-        # Wait for next refresh
-        sleep "$REFRESH_INTERVAL"
-    done
-}
-
-# Cleanup on exit
-cleanup() {
-    echo ""
-    log_info "Cleaning up..."
-    rm -f "$STATS_FILE"
-    echo -e "${GREEN}Monitor stopped${NC}"
-    exit 0
-}
-
-# Main execution
-main() {
-    # Set up signal handlers
-    trap cleanup SIGINT SIGTERM
-
-    # Start monitoring
-    monitor_loop
-}
-
-# Run main function
-main
+while true; do
+    display_dashboard
+    sleep "$REFRESH_INTERVAL"
+done
