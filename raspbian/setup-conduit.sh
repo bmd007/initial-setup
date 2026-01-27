@@ -135,7 +135,7 @@ services:
     image: ghcr.io/ssmirr/conduit/conduit:latest
     container_name: conduit
 
-    command: ["start", "-b", "3", "-m", "100", "-vv"]
+    command: ["start", "-b", "5", "-m", "500"]
 
     ports:
       - "${CONDUIT_PORT}:${CONDUIT_PORT}"
@@ -151,8 +151,8 @@ services:
     logging:
       driver: "json-file"
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: "100m"
+        max-file: "5"
 
 volumes:
   conduit-data:
