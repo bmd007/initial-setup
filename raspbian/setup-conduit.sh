@@ -28,7 +28,6 @@ NC='\033[0m'
 
 # Configuration
 CONDUIT_DIR="$HOME/conduit"
-CONDUIT_PORT=8080  # Default port, can be overridden
 SERVER_IP=""
 
 # Logging functions
@@ -51,54 +50,6 @@ log_error() {
 # Sudo wrapper function
 run_sudo() {
     echo "$SUDO_PASSWORD" | sudo -S "$@" 2>/dev/null || sudo "$@"
-}
-
-# Force open port by killing any process using it
-force_open_port() {
-    local port=$1
-
-    log_info "Force opening port $port..."
-
-    # Check if lsof is available, install if not
-    if ! command -v lsof &> /dev/null; then
-        log_warning "lsof not found, installing..."
-        run_sudo apt-get update -qq
-        run_sudo apt-get install -y lsof
-    fi
-
-    # Kill any process using the port
-    local pids
-    pids=$(lsof -ti :$port 2>/dev/null || echo "")
-
-    if [ -n "$pids" ]; then
-        log_warning "Port $port is in use by process(es): $pids"
-        log_info "Force killing process(es)..."
-
-        for pid in $pids; do
-            local process_name
-            process_name=$(ps -p $pid -o comm= 2>/dev/null || echo "unknown")
-            log_warning "Killing $process_name (PID: $pid)"
-            run_sudo kill -9 $pid 2>/dev/null || true
-        done
-
-        sleep 2
-
-        # Verify port is freed
-        if lsof -ti :$port >/dev/null 2>&1; then
-            log_error "Port $port still in use after killing processes"
-            # Try one more time
-            lsof -ti :$port 2>/dev/null | xargs -r run_sudo kill -9 2>/dev/null || true
-            sleep 1
-        fi
-
-        if ! lsof -ti :$port >/dev/null 2>&1; then
-            log_success "Port $port is now free"
-        else
-            log_warning "Port $port may still be in use, but continuing..."
-        fi
-    else
-        log_success "Port $port is already free"
-    fi
 }
 
 # Get server IP address
@@ -133,10 +84,7 @@ services:
     image: ghcr.io/ssmirr/conduit/conduit:latest
     container_name: conduit
 
-    command: ["start", "-b", "6", "-m", "1024"]
-
-    ports:
-      - "${CONDUIT_PORT}:${CONDUIT_PORT}"
+    command: ["start", "-b", "1024", "-m", "10"]
 
     volumes:
       - conduit-data:/home/conduit/data
@@ -248,13 +196,6 @@ show_connection_info() {
     log_success "Conduit Setup Complete!"
     echo "=========================================="
     echo ""
-    log_info "Conduit Details:"
-    echo "  • Server IP: $SERVER_IP"
-    echo "  • Port: $CONDUIT_PORT"
-    echo "  • Access URL: http://${SERVER_IP}:${CONDUIT_PORT}"
-    echo "  • Container: conduit"
-    echo "  • Data Volume: conduit-data"
-    echo ""
     log_info "Management Commands:"
     echo "  • View logs: docker logs conduit -f"
     echo "  • Stop: cd $CONDUIT_DIR && docker-compose down"
@@ -262,11 +203,6 @@ show_connection_info() {
     echo "  • Restart: docker restart conduit"
     echo "  • Status: docker ps | grep conduit"
     echo ""
-    echo ""
-    log_warning "Next Steps:"
-    echo "  1. Configure your Conduit settings"
-    echo "  2. Monitor logs: docker logs conduit -f"
-    echo "  3. Access Conduit at http://${SERVER_IP}:${CONDUIT_PORT}"
     echo ""
 }
 
@@ -282,17 +218,11 @@ main() {
     if [ $# -eq 0 ]; then
         log_error "Sudo password is required!"
         log_info "Usage: ./setup-conduit.sh <sudo_password> [port]"
-        log_info "Example: ./setup-conduit.sh MyPassword123 8080"
+        log_info "Example: ./setup-conduit.sh MyPassword123"
         exit 1
     fi
 
     SUDO_PASSWORD="$1"
-
-    # Optional port parameter
-    if [ $# -ge 2 ]; then
-        CONDUIT_PORT="$2"
-        log_info "Using custom port: $CONDUIT_PORT"
-    fi
 
     # Validate password
     if ! echo "$SUDO_PASSWORD" | run_sudo -S true 2>/dev/null; then
@@ -325,10 +255,6 @@ main() {
 
     # Get server IP
     get_server_ip
-
-    # Force open required port
-    echo ""
-    force_open_port $CONDUIT_PORT
 
     # Create Docker Compose file
     echo ""
