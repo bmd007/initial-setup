@@ -10,14 +10,10 @@
 # Conduit: https://conduit.psiphon.ca/
 # Image: ghcr.io/ssmirr/conduit/conduit:latest
 #
-# Usage: ./setup-conduit.sh <sudo_password> [port]
-# Example: ./setup-conduit.sh MyPassword123 8080
+# Usage: ./setup-conduit.sh
 ###############################################################################
 
 set -euo pipefail
-
-# Global sudo password
-SUDO_PASSWORD=""
 
 # Colors for output
 RED='\033[0;31m'
@@ -134,24 +130,6 @@ remove_existing() {
     fi
 }
 
-# Configure firewall to allow Conduit port
-configure_firewall() {
-    log_info "Configuring firewall for Conduit..."
-
-    # Check if UFW is installed and active
-    if command -v ufw &> /dev/null; then
-        if run_sudo ufw status 2>/dev/null | grep -q "Status: active"; then
-            log_info "UFW is active, adding rule for port $CONDUIT_PORT..."
-            run_sudo ufw allow $CONDUIT_PORT/tcp comment 'Conduit' 2>/dev/null || true
-            log_success "Firewall rule added"
-        else
-            log_info "UFW is not active, skipping firewall configuration"
-        fi
-    else
-        log_info "UFW not installed, skipping firewall configuration"
-    fi
-}
-
 # Start Conduit
 start_conduit() {
     log_info "Starting Conduit..."
@@ -198,8 +176,8 @@ show_connection_info() {
     echo ""
     log_info "Management Commands:"
     echo "  • View logs: docker logs conduit -f"
-    echo "  • Stop: cd $CONDUIT_DIR && docker-compose down"
-    echo "  • Start: cd $CONDUIT_DIR && docker-compose up -d"
+    echo "  • Stop: cd $CONDUIT_DIR && docker compose down"
+    echo "  • Start: cd $CONDUIT_DIR && docker compose up -d"
     echo "  • Restart: docker restart conduit"
     echo "  • Status: docker ps | grep conduit"
     echo ""
@@ -208,29 +186,6 @@ show_connection_info() {
 
 # Main execution
 main() {
-    echo ""
-    echo "=========================================="
-    echo "  Conduit Setup"
-    echo "=========================================="
-    echo ""
-
-    # Check if password provided
-    if [ $# -eq 0 ]; then
-        log_error "Sudo password is required!"
-        log_info "Usage: ./setup-conduit.sh <sudo_password> [port]"
-        log_info "Example: ./setup-conduit.sh MyPassword123"
-        exit 1
-    fi
-
-    SUDO_PASSWORD="$1"
-
-    # Validate password
-    if ! echo "$SUDO_PASSWORD" | run_sudo -S true 2>/dev/null; then
-        log_error "Invalid sudo password provided"
-        exit 1
-    fi
-    log_success "Sudo password validated"
-
     # Check if Docker is installed
     if ! command -v docker &> /dev/null; then
         log_error "Docker is not installed!"
@@ -263,10 +218,6 @@ main() {
     # Remove existing installation
     echo ""
     remove_existing
-
-    # Configure firewall
-    echo ""
-    configure_firewall
 
     # Start Conduit
     echo ""
