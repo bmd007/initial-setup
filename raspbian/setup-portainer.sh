@@ -277,6 +277,9 @@ EOF
 
     log_success "Portainer started successfully"
 
+    # Wait a moment for Portainer to fully start
+    sleep 3
+
     # Get IP address
     IP_ADDR=$(hostname -I | awk '{print $1}')
 
@@ -285,7 +288,15 @@ EOF
     echo "  • HTTP:  http://${IP_ADDR}:9000"
     echo "  • HTTPS: https://${IP_ADDR}:9443"
     echo ""
-    log_info "Note: On first access, you'll need to create an admin account (within 5 minutes)"
+    log_warning "⚠️  IMPORTANT: First-Time Setup Required (within 5 minutes)"
+    echo ""
+    echo "1. Open Portainer in your browser"
+    echo "2. Create an admin account (username + password)"
+    echo "3. Select 'Get Started' or 'Docker' environment"
+    echo ""
+    log_info "The Docker environment will be automatically detected via /var/run/docker.sock"
+    log_info "You should see your local Docker containers immediately after setup"
+    echo ""
     log_info "Portainer compose file location: $PORTAINER_DIR/docker-compose.yml"
 }
 

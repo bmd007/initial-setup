@@ -159,6 +159,18 @@ After setup completes:
 
 **⚠️ Important:** Create admin account within 5 minutes of first access!
 
+### First-Time Setup (Required)
+
+On first access, you **must** configure Portainer:
+
+1. **Create admin account** (username + password)
+2. **Select "Get Started"** or choose "Docker" environment
+3. **Done!** - Your local Docker environment will be connected automatically
+
+**Why no environment initially?** Portainer requires manual setup for security. The Docker socket is already mounted - you just need to enable it through the web UI on first access.
+
+**📖 Full Guide**: See `PORTAINER-SETUP.md` for detailed instructions and troubleshooting
+
 ### Manage Portainer
 
 ```bash
@@ -567,6 +579,7 @@ raspbian/
 ├── conntrack-monitor-compose.yml   Conntrack Monitor Docker Compose config (reference)
 ├── test-network-info.sh            Network info test script
 ├── NETWORK-CONFIG.md               Network configuration guide
+├── PORTAINER-SETUP.md              Portainer setup and first-time configuration guide
 ├── CONDUIT-SETUP.md                Conduit setup and management guide
 ├── CONDUIT-MONITOR.md              Conduit monitoring & health check guide
 ├── CONNTRACK-MONITOR-SETUP.md      Conntrack Monitor setup and usage guide
