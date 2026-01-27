@@ -36,6 +36,18 @@ PREV_DOWNLOAD=0
 PREV_REPUTATION=0
 FIRST_RUN=true
 
+# Detect if we're over SSH or have a proper terminal
+IS_SSH=false
+if [ -n "${SSH_CONNECTION:-}" ] || [ -n "${SSH_CLIENT:-}" ] || [ -n "${SSH_TTY:-}" ]; then
+    IS_SSH=true
+fi
+
+# Check if terminal supports ANSI
+HAS_ANSI=true
+if [ ! -t 1 ] || [ "${TERM:-}" = "dumb" ]; then
+    HAS_ANSI=false
+fi
+
 # Function to safely get numeric value with default
 get_numeric() {
     local value="$1"
@@ -166,12 +178,19 @@ get_status() {
 
 # Function to display the dashboard
 display_dashboard() {
-    # On first run, clear screen and hide cursor. Otherwise, just move to home position
+    # On SSH or first run, use clear command for better compatibility
+    # Otherwise use cursor positioning for smoother updates
     if [ "$FIRST_RUN" = true ]; then
         clear
-        echo -e "${HIDE_CURSOR}"
+        if [ "$HAS_ANSI" = true ]; then
+            echo -e "${HIDE_CURSOR}"
+        fi
         FIRST_RUN=false
+    elif [ "$IS_SSH" = true ]; then
+        # Over SSH, use clear for better reliability
+        clear
     else
+        # Local terminal, use cursor positioning
         echo -e "${CURSOR_HOME}"
     fi
 
@@ -219,11 +238,18 @@ display_dashboard() {
     # Get status
     local status=$(get_status "$connected_clients" "$error_count")
 
-    # Header
-    echo -e "${CYAN}╔════════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${NC}              ${BLUE}Conduit Real-Time Monitor${NC}                         ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}          ${MAGENTA}Tracking Broker Communication & Activity${NC}             ${CYAN}║${NC}"
-    echo -e "${CYAN}╚════════════════════════════════════════════════════════════════════╝${NC}"
+    # Header - use simpler characters over SSH
+    if [ "$IS_SSH" = true ]; then
+        echo "===================================================================="
+        echo "              Conduit Real-Time Monitor"
+        echo "          Tracking Broker Communication & Activity"
+        echo "===================================================================="
+    else
+        echo -e "${CYAN}╔════════════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${CYAN}║${NC}              ${BLUE}Conduit Real-Time Monitor${NC}                         ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}          ${MAGENTA}Tracking Broker Communication & Activity${NC}             ${CYAN}║${NC}"
+        echo -e "${CYAN}╚════════════════════════════════════════════════════════════════════╝${NC}"
+    fi
     echo ""
 
     # Container info
@@ -234,7 +260,11 @@ display_dashboard() {
     echo ""
 
     # Node Status
-    echo -e "${MAGENTA}━━━━ Node Status ━━━━${NC}"
+    if [ "$IS_SSH" = true ]; then
+        echo "---- Node Status ----"
+    else
+        echo -e "${MAGENTA}━━━━ Node Status ━━━━${NC}"
+    fi
     echo -e "${BLUE}Status:${NC} $status"
     echo -e "${BLUE}Initializing connection to Psiphon network${NC}"
     echo ""
@@ -258,7 +288,11 @@ display_dashboard() {
     echo ""
 
     # Connection Statistics
-    echo -e "${MAGENTA}━━━━ Connection Statistics ━━━━${NC}"
+    if [ "$IS_SSH" = true ]; then
+        echo "---- Connection Statistics ----"
+    else
+        echo -e "${MAGENTA}━━━━ Connection Statistics ━━━━${NC}"
+    fi
 
     local status_indicator=$YELLOW
     if safe_compare "$connected_clients" 0 "-gt"; then
@@ -273,7 +307,11 @@ display_dashboard() {
     echo ""
 
     # Health Summary
-    echo -e "${MAGENTA}━━━━ Health Summary ━━━━${NC}"
+    if [ "$IS_SSH" = true ]; then
+        echo "---- Health Summary ----"
+    else
+        echo -e "${MAGENTA}━━━━ Health Summary ━━━━${NC}"
+    fi
 
     local error_indicator=$GREEN
     if safe_compare "$error_count" 0 "-gt"; then
@@ -285,9 +323,18 @@ display_dashboard() {
     echo ""
 
     # Trend Analysis
-    echo -e "${MAGENTA}━━━━ Trend Analysis ━━━━${NC}"
+    if [ "$IS_SSH" = true ]; then
+        echo "---- Trend Analysis ----"
+    else
+        echo -e "${MAGENTA}━━━━ Trend Analysis ━━━━${NC}"
+    fi
     echo ""
-    echo -e "${MAGENTA}━━━━ Recent Events (Last ${LOG_LINES} Lines) ━━━━${NC}"
+
+    if [ "$IS_SSH" = true ]; then
+        echo "---- Recent Events (Last ${LOG_LINES} Lines) ----"
+    else
+        echo -e "${MAGENTA}━━━━ Recent Events (Last ${LOG_LINES} Lines) ━━━━${NC}"
+    fi
 
     # Display recent events with color coding
     local recent_logs=$(echo "$logs" | tail -n "$LOG_LINES")
@@ -310,7 +357,11 @@ display_dashboard() {
     done <<< "$recent_logs"
 
     echo ""
-    echo -e "${MAGENTA}━━━━ Tips ━━━━${NC}"
+    if [ "$IS_SSH" = true ]; then
+        echo "---- Tips ----"
+    else
+        echo -e "${MAGENTA}━━━━ Tips ━━━━${NC}"
+    fi
     echo -e "${CYAN}💡 'limited' and 'no match' messages are normal - they mean your node is"
     echo -e "   properly announcing itself to the broker but no clients need connections yet.${NC}"
     echo ""
@@ -334,10 +385,28 @@ if ! docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
 fi
 
 # Trap Ctrl+C for clean exit
-trap 'echo -e "\n${SHOW_CURSOR}${BLUE}Stopping monitor...${NC}"; exit 0' INT TERM
+cleanup() {
+    echo ""
+    if [ "$HAS_ANSI" = true ]; then
+        echo -e "${SHOW_CURSOR}"
+    fi
+    echo -e "${BLUE}Stopping monitor...${NC}"
+    # Reset terminal
+    tput sgr0 2>/dev/null || true
+    exit 0
+}
+trap cleanup INT TERM
 
 # Main monitoring loop
 while true; do
     display_dashboard
+
+    # Flush output to ensure everything is written
+    # This is especially important over SSH
+    if [ "$IS_SSH" = true ]; then
+        # Small delay to ensure terminal catches up
+        sleep 0.1
+    fi
+
     sleep "$REFRESH_INTERVAL"
 done
