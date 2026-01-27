@@ -276,6 +276,97 @@ Visualize connections with real-time monitoring:
 
 ---
 
+## 🔍 Conntrack Monitor Setup (Optional)
+
+Conntrack Monitor is a Terminal User Interface (TUI) application that monitors network connections in real-time with geographical information.
+
+### Install Conntrack Monitor
+
+```bash
+# Run setup script
+./setup-conntrack-monitor.sh YourSudoPassword
+```
+
+### What It Does
+
+1. **Creates Docker Compose** - Sets up container configuration
+2. **Removes old installation** - Cleans up existing installation
+3. **Pulls latest image** - Downloads conntrack-monitor image
+4. **Sets up GeoIP** - Automatic GeoIP database volume
+5. **Starts container** - Launches in detached mode
+
+### Key Features
+
+- **Real-time monitoring** - Live network connection tracking
+- **GeoIP information** - Automatic DB-IP Lite database download
+- **TUI interface** - Beautiful terminal-based UI
+- **Host network mode** - Monitors actual host connections
+- **Automatic databases** - No manual GeoIP configuration needed
+
+### View the TUI
+
+Since Conntrack Monitor is a TUI application, attach to see the interface:
+
+```bash
+# Attach to view the TUI
+docker attach conntrack-monitor
+
+# Detach without stopping (keep it running)
+# Press: Ctrl+P then Ctrl+Q
+```
+
+### Alternative: Interactive Mode
+
+Run in a one-off interactive session:
+
+```bash
+cd ~/conntrack-monitor
+docker compose run --rm conntrack-monitor
+```
+
+### Manage Conntrack Monitor
+
+```bash
+# Start
+cd ~/conntrack-monitor && docker-compose up -d
+
+# Stop
+cd ~/conntrack-monitor && docker-compose down
+
+# Restart
+docker restart conntrack-monitor
+
+# Check status
+docker ps | grep conntrack-monitor
+
+# Attach to TUI
+docker attach conntrack-monitor
+```
+
+### GeoIP Databases
+
+**Default (DB-IP Lite):**
+- Automatically downloads on first run
+- No configuration needed
+- Free and updated regularly
+
+**Optional (MaxMind GeoLite2):**
+- Higher accuracy if preferred
+- See `CONNTRACK-MONITOR-SETUP.md` for setup
+
+### Security Notes
+
+⚠️ The container runs in:
+- **Privileged mode** - Required for conntrack access
+- **Host network** - Monitors host network traffic
+- **NET_ADMIN capability** - For connection tracking
+
+Only run on trusted hosts.
+
+**📖 Full Guide**: See `CONNTRACK-MONITOR-SETUP.md` for complete documentation
+
+---
+
 ## 🔧 Customization
 
 ### Change zsh Theme
@@ -465,18 +556,21 @@ nano ~/wifi-config.txt
 
 ```
 raspbian/
-├── initial-setup.sh           Main installation script
-├── setup-portainer.sh         Portainer setup/management script (optional)
-├── setup-conduit.sh           Conduit load balancer script (optional)
-├── conduit-monitor.sh         Conduit connection monitor/visualizer (optional)
-├── conduit-health.sh          Conduit health check tool (optional)
-├── wifi-config.txt            WiFi credentials (edit before running)
-├── portainer-compose.yml      Portainer Docker Compose config (reference)
-├── test-network-info.sh       Network info test script
-├── NETWORK-CONFIG.md          Network configuration guide
-├── CONDUIT-SETUP.md           Conduit setup and management guide
-├── CONDUIT-MONITOR.md         Conduit monitoring & health check guide
-└── README.md                  This file
+├── initial-setup.sh                Main installation script
+├── setup-portainer.sh              Portainer setup/management script (optional)
+├── setup-conduit.sh                Conduit load balancer script (optional)
+├── conduit-monitor.sh              Conduit connection monitor/visualizer (optional)
+├── conduit-health.sh               Conduit health check tool (optional)
+├── setup-conntrack-monitor.sh      Conntrack Monitor setup script (optional)
+├── wifi-config.txt                 WiFi credentials (edit before running)
+├── portainer-compose.yml           Portainer Docker Compose config (reference)
+├── conntrack-monitor-compose.yml   Conntrack Monitor Docker Compose config (reference)
+├── test-network-info.sh            Network info test script
+├── NETWORK-CONFIG.md               Network configuration guide
+├── CONDUIT-SETUP.md                Conduit setup and management guide
+├── CONDUIT-MONITOR.md              Conduit monitoring & health check guide
+├── CONNTRACK-MONITOR-SETUP.md      Conntrack Monitor setup and usage guide
+└── README.md                       This file
 ```
 
 ---
@@ -495,7 +589,10 @@ After running the script successfully:
 
 **Total setup time:** ~10-15 minutes (first run)
 
-**Optional:** Run `setup-portainer.sh` to add Docker web management UI
+**Optional Tools:**
+- Run `setup-portainer.sh` to add Docker web management UI
+- Run `setup-conduit.sh` to set up Psiphon's load balancer
+- Run `setup-conntrack-monitor.sh` to monitor network connections with TUI
 
 ---
 
