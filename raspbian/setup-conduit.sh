@@ -128,14 +128,12 @@ create_docker_compose() {
     mkdir -p "$CONDUIT_DIR"
 
     cat > "$CONDUIT_DIR/docker-compose.yml" << EOF
-version: '3.8'
-
 services:
   conduit:
     image: ghcr.io/ssmirr/conduit/conduit:latest
     container_name: conduit
 
-    command: ["start", "-b", "5", "-m", "500"]
+    command: ["start", "-b", "6", "-m", "1024"]
 
     ports:
       - "${CONDUIT_PORT}:${CONDUIT_PORT}"
