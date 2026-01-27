@@ -53,7 +53,7 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Get detailed Conduit statistics
+# Get detailed Conduit statistics from real STATS logs
 get_conduit_stats() {
     if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
         return 1
@@ -61,89 +61,160 @@ get_conduit_stats() {
 
     local logs=$(docker logs "$CONTAINER_NAME" --tail $LOG_LINES 2>&1)
 
-    # Count Conduit-specific events
-    local announced=$(echo "$logs" | grep -ci "announc" 2>/dev/null || echo "0")
-    local limited=$(echo "$logs" | grep -ci "limited" 2>/dev/null || echo "0")
-    local no_match=$(echo "$logs" | grep -ci "no match" 2>/dev/null || echo "0")
-    local matched=$(echo "$logs" | grep -ci "matched\|match.*client" 2>/dev/null || echo "0")
-    local relay=$(echo "$logs" | grep -ci "relay\|relaying\|proxying" 2>/dev/null || echo "0")
-    local connected=$(echo "$logs" | grep -ci "connected.*client\|client.*connected" 2>/dev/null || echo "0")
-    local disconnected=$(echo "$logs" | grep -ci "disconnect\|closed.*connection" 2>/dev/null || echo "0")
+    # Parse the latest STATS line
+    # Format: [STATS] Connecting: X | Connected: Y | Up: Z | Down: W | Uptime: T
+    local latest_stats=$(echo "$logs" | grep "\[STATS\]" | tail -1)
 
-    # Broker communication
-    local broker_contact=$(echo "$logs" | grep -ci "broker\|contacting\|registering" 2>/dev/null || echo "0")
+    local connecting=0
+    local connected=0
+    local up_bytes=0
+    local down_bytes=0
+    local uptime="0s"
 
-    # WebRTC specific
-    local webrtc_offer=$(echo "$logs" | grep -ci "offer\|sdp" 2>/dev/null || echo "0")
-    local webrtc_answer=$(echo "$logs" | grep -ci "answer" 2>/dev/null || echo "0")
-    local ice_candidate=$(echo "$logs" | grep -ci "ice.*candidate\|candidate.*ice" 2>/dev/null || echo "0")
+    if [ -n "$latest_stats" ]; then
+        # Extract Connecting count
+        connecting=$(echo "$latest_stats" | grep -o "Connecting: [0-9]*" | grep -o "[0-9]*" || echo "0")
+
+        # Extract Connected count
+        connected=$(echo "$latest_stats" | grep -o "Connected: [0-9]*" | grep -o "[0-9]*" || echo "0")
+
+        # Extract upload (convert to bytes)
+        local up_raw=$(echo "$latest_stats" | grep -o "Up: [^|]*" | sed 's/Up: //' | xargs)
+        up_bytes=$(parse_bytes "$up_raw")
+
+        # Extract download (convert to bytes)
+        local down_raw=$(echo "$latest_stats" | grep -o "Down: [^|]*" | sed 's/Down: //' | xargs)
+        down_bytes=$(parse_bytes "$down_raw")
+
+        # Extract uptime
+        uptime=$(echo "$latest_stats" | grep -o "Uptime: [^|]*" | sed 's/Uptime: //' | xargs || echo "0s")
+    fi
+
+    # Check for connection status
+    local psiphon_connected=$(echo "$logs" | grep -c "\[OK\] Connected to Psiphon network" 2>/dev/null || echo "0")
+
+    # Count total STATS entries (activity indicator)
+    local stats_count=$(echo "$logs" | grep -c "\[STATS\]" 2>/dev/null || echo "0")
+
+    # Historical peak connections (from all STATS lines)
+    local peak_connecting=$(echo "$logs" | grep "\[STATS\]" | grep -o "Connecting: [0-9]*" | grep -o "[0-9]*" | sort -rn | head -1 || echo "0")
+    local peak_connected=$(echo "$logs" | grep "\[STATS\]" | grep -o "Connected: [0-9]*" | grep -o "[0-9]*" | sort -rn | head -1 || echo "0")
 
     # Error tracking
     local errors=$(echo "$logs" | grep -c "ERROR\|error" 2>/dev/null || echo "0")
     local warnings=$(echo "$logs" | grep -c "WARN\|warning" 2>/dev/null || echo "0")
     local fatals=$(echo "$logs" | grep -c "FATAL\|fatal\|panic" 2>/dev/null || echo "0")
 
-    # Data transfer indicators
-    local bytes_sent=$(echo "$logs" | grep -o "sent [0-9]* bytes\|[0-9]* bytes sent" 2>/dev/null | grep -o "[0-9]*" | awk '{sum+=$1} END {print sum+0}')
-    local bytes_recv=$(echo "$logs" | grep -o "received [0-9]* bytes\|[0-9]* bytes received" 2>/dev/null | grep -o "[0-9]*" | awk '{sum+=$1} END {print sum+0}')
-
-    echo "$announced|$limited|$no_match|$matched|$relay|$connected|$disconnected|$broker_contact|$webrtc_offer|$webrtc_answer|$ice_candidate|$errors|$warnings|$fatals|$bytes_sent|$bytes_recv"
+    echo "$connecting|$connected|$up_bytes|$down_bytes|$uptime|$psiphon_connected|$stats_count|$peak_connecting|$peak_connected|$errors|$warnings|$fatals"
 }
 
-# Calculate reputation score (estimated)
+# Parse bandwidth strings to bytes
+parse_bytes() {
+    local str="$1"
+
+    if [ -z "$str" ] || [ "$str" = "0 B" ]; then
+        echo "0"
+        return
+    fi
+
+    # Extract number and unit
+    local num=$(echo "$str" | grep -o "^[0-9.]*")
+    local unit=$(echo "$str" | grep -o "[A-Z]*B$")
+
+    if [ -z "$num" ]; then
+        echo "0"
+        return
+    fi
+
+    # Convert to bytes
+    case "$unit" in
+        "B")
+            echo "$num" | awk '{printf "%.0f", $1}'
+            ;;
+        "KB")
+            echo "$num" | awk '{printf "%.0f", $1 * 1024}'
+            ;;
+        "MB")
+            echo "$num" | awk '{printf "%.0f", $1 * 1024 * 1024}'
+            ;;
+        "GB")
+            echo "$num" | awk '{printf "%.0f", $1 * 1024 * 1024 * 1024}'
+            ;;
+        *)
+            echo "0"
+            ;;
+    esac
+}
+
+# Calculate reputation score based on actual activity
 calculate_reputation() {
-    local announced=$1
-    local limited=$2
-    local no_match=$3
-    local matched=$4
-    local relay=$5
-    local errors=$6
+    local connecting=$1
+    local connected=$2
+    local up_bytes=$3
+    local down_bytes=$4
+    local peak_connecting=$5
+    local peak_connected=$6
+    local errors=$7
 
     # Reputation factors:
-    # + announcements show activity
-    # + limited/no_match show broker communication (good!)
-    # + matched connections are excellent
-    # + relay activity is the best
+    # + connected clients (most important)
+    # + data transfer activity
+    # + peak connections reached
+    # + connecting attempts (shows you're being tried)
     # - errors hurt reputation
 
-    local communication_score=$((announced + limited + no_match))
-    local activity_score=$((matched * 10 + relay * 20))
+    local connected_score=$((connected * 20))
+    local peak_score=$((peak_connected * 10))
+    local connecting_score=$((connecting / 2))
+    local transfer_score=0
+
+    # Data transfer is a strong positive signal
+    if [ $down_bytes -gt 1048576 ]; then  # > 1MB
+        transfer_score=30
+    elif [ $down_bytes -gt 10240 ]; then  # > 10KB
+        transfer_score=15
+    elif [ $down_bytes -gt 0 ]; then
+        transfer_score=5
+    fi
+
     local penalty=$((errors * 2))
 
-    local total=$((communication_score + activity_score - penalty))
+    local total=$((connected_score + peak_score + connecting_score + transfer_score - penalty))
 
     # Normalize to 0-100
     if [ $total -lt 0 ]; then
         echo "0"
-    elif [ $total -gt 1000 ]; then
+    elif [ $total -gt 100 ]; then
         echo "100"
     else
-        echo $((total / 10))
+        echo "$total"
     fi
 }
 
-# Determine node status
+# Determine node status based on actual activity
 get_node_status() {
-    local announced=$1
-    local limited=$2
-    local no_match=$3
-    local matched=$4
-    local relay=$5
-    local broker_contact=$6
-    local errors=$7
+    local connecting=$1
+    local connected=$2
+    local up_bytes=$3
+    local down_bytes=$4
+    local psiphon_connected=$5
+    local errors=$6
 
-    if [ $relay -gt 0 ]; then
-        echo "ACTIVE|Actively relaying traffic for clients"
-    elif [ $matched -gt 0 ]; then
-        echo "MATCHED|Matched with clients, establishing connections"
-    elif [ $limited -gt 0 ] || [ $no_match -gt 0 ]; then
-        echo "READY|Communicating with broker, waiting for clients"
-    elif [ $announced -gt 0 ] || [ $broker_contact -gt 0 ]; then
-        echo "ANNOUNCING|Registering with Psiphon network"
+    # Determine status based on actual activity
+    if [ $connected -gt 0 ]; then
+        if [ $down_bytes -gt 10240 ]; then  # > 10KB transferred
+            echo "ACTIVE|Actively serving $connected client(s) - transferring data!"
+        else
+            echo "CONNECTED|$connected client(s) connected, establishing data flow"
+        fi
+    elif [ $connecting -gt 0 ]; then
+        echo "CONNECTING|$connecting client(s) connecting - waiting for handshake"
+    elif [ $psiphon_connected -gt 0 ]; then
+        echo "READY|Connected to Psiphon - waiting for clients"
     elif [ $errors -gt 10 ]; then
         echo "ERROR|Experiencing errors, check logs"
     else
-        echo "STARTING|Container starting up"
+        echo "STARTING|Initializing connection to Psiphon network"
     fi
 }
 
@@ -173,15 +244,15 @@ show_header() {
 # Display node status dashboard
 show_node_status() {
     local stats=$1
-    IFS='|' read -r announced limited no_match matched relay connected disconnected broker_contact webrtc_offer webrtc_answer ice_candidate errors warnings fatals bytes_sent bytes_recv <<< "$stats"
+    IFS='|' read -r connecting connected up_bytes down_bytes uptime psiphon_connected stats_count peak_connecting peak_connected errors warnings fatals <<< "$stats"
 
     # Get status
-    local status_info=$(get_node_status "$announced" "$limited" "$no_match" "$matched" "$relay" "$broker_contact" "$errors")
+    local status_info=$(get_node_status "$connecting" "$connected" "$up_bytes" "$down_bytes" "$psiphon_connected" "$errors")
     local status=$(echo "$status_info" | cut -d'|' -f1)
     local status_desc=$(echo "$status_info" | cut -d'|' -f2)
 
     # Calculate reputation
-    local reputation=$(calculate_reputation "$announced" "$limited" "$no_match" "$matched" "$relay" "$errors")
+    local reputation=$(calculate_reputation "$connecting" "$connected" "$up_bytes" "$down_bytes" "$peak_connecting" "$peak_connected" "$errors")
 
     echo -e "${BOLD}${MAGENTA}═══ Node Status ═══${NC}"
 
@@ -191,15 +262,15 @@ show_node_status() {
             echo -e "${BOLD}Status:${NC} ${GREEN}${BOLD}● $status${NC}"
             echo -e "${GREEN}$status_desc${NC}"
             ;;
-        "MATCHED")
+        "CONNECTED")
             echo -e "${BOLD}Status:${NC} ${CYAN}${BOLD}● $status${NC}"
             echo -e "${CYAN}$status_desc${NC}"
             ;;
-        "READY")
+        "CONNECTING")
             echo -e "${BOLD}Status:${NC} ${YELLOW}${BOLD}● $status${NC}"
             echo -e "${YELLOW}$status_desc${NC}"
             ;;
-        "ANNOUNCING")
+        "READY")
             echo -e "${BOLD}Status:${NC} ${BLUE}${BOLD}● $status${NC}"
             echo -e "${BLUE}$status_desc${NC}"
             ;;
@@ -227,86 +298,74 @@ show_node_status() {
     else
         echo -e "${RED}${bar}${NC}${empty} ${BOLD}${reputation}%${NC} ${RED}(Starting)${NC}"
     fi
+
+    # Show uptime from STATS
+    if [ -n "$uptime" ] && [ "$uptime" != "0s" ]; then
+        echo -e "${CYAN}●${NC} Conduit Uptime: ${BOLD}$uptime${NC}"
+    fi
     echo ""
 }
 
 # Display broker communication statistics
-show_broker_stats() {
+show_connection_stats() {
     local stats=$1
-    IFS='|' read -r announced limited no_match matched relay connected disconnected broker_contact webrtc_offer webrtc_answer ice_candidate errors warnings fatals bytes_sent bytes_recv <<< "$stats"
+    IFS='|' read -r connecting connected up_bytes down_bytes uptime psiphon_connected stats_count peak_connecting peak_connected errors warnings fatals <<< "$stats"
 
-    echo -e "${BOLD}${MAGENTA}═══ Broker Communication ═══${NC}"
-    echo -e "${CYAN}●${NC} Announcements sent:     ${BOLD}$announced${NC}"
-    echo -e "${CYAN}●${NC} Broker contacts:        ${BOLD}$broker_contact${NC}"
+    echo -e "${BOLD}${MAGENTA}═══ Connection Statistics ═══${NC}"
 
-    # Rate limiting is GOOD - it means you're being heard!
-    if [ $limited -gt 0 ]; then
-        echo -e "${GREEN}●${NC} Rate limited responses: ${BOLD}${GREEN}$limited${NC} ${GREEN}✓ (Good!)${NC}"
-    else
-        echo -e "${YELLOW}●${NC} Rate limited responses: ${BOLD}$limited${NC}"
-    fi
-
-    # No match is also GOOD - broker is responding
-    if [ $no_match -gt 0 ]; then
-        echo -e "${GREEN}●${NC} No match responses:     ${BOLD}${GREEN}$no_match${NC} ${GREEN}✓ (Good!)${NC}"
-    else
-        echo -e "${YELLOW}●${NC} No match responses:     ${BOLD}$no_match${NC}"
-    fi
-
-    # Interpretation
-    local total_responses=$((limited + no_match))
-    if [ $total_responses -gt 0 ]; then
+    # Psiphon connection status
+    if [ $psiphon_connected -gt 0 ]; then
+        echo -e "${GREEN}${BOLD}✓ CONNECTED TO PSIPHON NETWORK${NC}"
         echo ""
-        echo -e "${GREEN}${BOLD}✓ BROKER COMMUNICATION WORKING${NC}"
-        echo -e "${GREEN}  Your node is registered and responding to broker queries${NC}"
     else
-        echo ""
-        echo -e "${YELLOW}${BOLD}⚠ WAITING FOR BROKER RESPONSES${NC}"
-        echo -e "${YELLOW}  This is normal when just starting - be patient${NC}"
-    fi
-    echo ""
-}
-
-# Display connection activity
-show_connection_activity() {
-    local stats=$1
-    IFS='|' read -r announced limited no_match matched relay connected disconnected broker_contact webrtc_offer webrtc_answer ice_candidate errors warnings fatals bytes_sent bytes_recv <<< "$stats"
-
-    echo -e "${BOLD}${MAGENTA}═══ Connection Activity ═══${NC}"
-
-    if [ $matched -gt 0 ] || [ $relay -gt 0 ] || [ $connected -gt 0 ]; then
-        echo -e "${GREEN}${BOLD}✓ YOUR NODE IS HELPING USERS!${NC}"
+        echo -e "${YELLOW}${BOLD}⚠ CONNECTING TO PSIPHON NETWORK${NC}"
         echo ""
     fi
 
-    echo -e "${CYAN}●${NC} Client matches:         ${BOLD}$matched${NC}"
-    echo -e "${CYAN}●${NC} Active relays:          ${BOLD}$relay${NC}"
-    echo -e "${GREEN}●${NC} Clients connected:      ${BOLD}$connected${NC}"
-    echo -e "${BLUE}●${NC} Clients disconnected:   ${BOLD}$disconnected${NC}"
+    # Current connections
+    echo -e "${BOLD}Current:${NC}"
+    echo -e "${CYAN}●${NC} Connecting clients:     ${BOLD}$connecting${NC}"
+    echo -e "${GREEN}●${NC} Connected clients:      ${BOLD}$connected${NC}"
 
-    echo ""
-    echo -e "${BOLD}WebRTC Signaling:${NC}"
-    echo -e "${CYAN}●${NC} Offers sent/received:   ${BOLD}$webrtc_offer${NC}"
-    echo -e "${CYAN}●${NC} Answers sent/received:  ${BOLD}$webrtc_answer${NC}"
-    echo -e "${CYAN}●${NC} ICE candidates:         ${BOLD}$ice_candidate${NC}"
+    # Peak connections
+    if [ $peak_connecting -gt 0 ] || [ $peak_connected -gt 0 ]; then
+        echo ""
+        echo -e "${BOLD}Peak (this session):${NC}"
+        echo -e "${CYAN}●${NC} Peak connecting:        ${BOLD}$peak_connecting${NC}"
+        echo -e "${GREEN}●${NC} Peak connected:         ${BOLD}$peak_connected${NC}"
+    fi
 
     # Data transfer
-    if [ $bytes_sent -gt 0 ] || [ $bytes_recv -gt 0 ]; then
+    if [ $up_bytes -gt 0 ] || [ $down_bytes -gt 0 ]; then
         echo ""
         echo -e "${BOLD}Data Transfer:${NC}"
         # Format bytes with fallback if numfmt not available
-        local sent_formatted=$(numfmt --to=iec-i --suffix=B $bytes_sent 2>/dev/null || echo "${bytes_sent}B")
-        local recv_formatted=$(numfmt --to=iec-i --suffix=B $bytes_recv 2>/dev/null || echo "${bytes_recv}B")
-        echo -e "${GREEN}●${NC} Bytes sent:             ${BOLD}${sent_formatted}${NC}"
-        echo -e "${GREEN}●${NC} Bytes received:         ${BOLD}${recv_formatted}${NC}"
+        local up_formatted=$(numfmt --to=iec-i --suffix=B $up_bytes 2>/dev/null || echo "${up_bytes}B")
+        local down_formatted=$(numfmt --to=iec-i --suffix=B $down_bytes 2>/dev/null || echo "${down_bytes}B")
+        echo -e "${GREEN}●${NC} Uploaded:               ${BOLD}${up_formatted}${NC}"
+        echo -e "${GREEN}●${NC} Downloaded:             ${BOLD}${down_formatted}${NC}"
+
+        # Show if actively transferring data
+        if [ $down_bytes -gt 10240 ]; then
+            echo ""
+            echo -e "${GREEN}${BOLD}✓ ACTIVELY TRANSFERRING DATA${NC}"
+            echo -e "${GREEN}  Your node is helping users bypass censorship!${NC}"
+        fi
     fi
+
+    # STATS activity indicator
+    if [ $stats_count -gt 0 ]; then
+        echo ""
+        echo -e "${BLUE}●${NC} Stats updates:          ${BOLD}$stats_count${NC} (activity indicator)"
+    fi
+
     echo ""
 }
 
 # Display error summary
 show_error_summary() {
     local stats=$1
-    IFS='|' read -r announced limited no_match matched relay connected disconnected broker_contact webrtc_offer webrtc_answer ice_candidate errors warnings fatals bytes_sent bytes_recv <<< "$stats"
+    IFS='|' read -r connecting connected up_bytes down_bytes uptime psiphon_connected stats_count peak_connecting peak_connected errors warnings fatals <<< "$stats"
 
     echo -e "${BOLD}${MAGENTA}═══ Health Summary ═══${NC}"
 
@@ -343,14 +402,13 @@ show_recent_events() {
                 echo -e "${RED}[ERROR]${NC} ${line}"
             elif echo "$line" | grep -qi "warn"; then
                 echo -e "${YELLOW}[WARN]${NC} ${line}"
-            elif echo "$line" | grep -qi "limited"; then
-                echo -e "${GREEN}[GOOD]${NC} ${GREEN}${line}${NC} ${GREEN}✓${NC}"
-            elif echo "$line" | grep -qi "no match"; then
-                echo -e "${GREEN}[GOOD]${NC} ${GREEN}${line}${NC} ${GREEN}✓${NC}"
-            elif echo "$line" | grep -qi "matched\|relay\|connected.*client"; then
-                echo -e "${CYAN}${BOLD}[ACTIVE]${NC} ${CYAN}${line}${NC}"
-            elif echo "$line" | grep -qi "announc"; then
-                echo -e "${BLUE}[INFO]${NC} ${line}"
+            elif echo "$line" | grep -qi "\[STATS\]"; then
+                # Highlight STATS lines in cyan
+                echo -e "${CYAN}[STATS]${NC} ${line}"
+            elif echo "$line" | grep -qi "\[OK\] Connected to Psiphon"; then
+                echo -e "${GREEN}${BOLD}[OK]${NC} ${GREEN}${line}${NC}"
+            elif echo "$line" | grep -qi "Starting.*Conduit"; then
+                echo -e "${BLUE}[START]${NC} ${line}"
             else
                 echo -e "${NC}${line}"
             fi
@@ -388,25 +446,35 @@ show_trends() {
     local first=$(head -1 "$HISTORY_FILE")
     local last=$(tail -1 "$HISTORY_FILE")
 
-    # Parse matched connections from first and last
-    local first_matched=$(echo "$first" | cut -d'|' -f5)
-    local last_matched=$(echo "$last" | cut -d'|' -f5)
-    local matched_change=$((last_matched - first_matched))
+    # Parse connecting from first and last (field 2)
+    local first_connecting=$(echo "$first" | cut -d'|' -f2)
+    local last_connecting=$(echo "$last" | cut -d'|' -f2)
+    local connecting_change=$((last_connecting - first_connecting))
 
-    # Parse relay from first and last
-    local first_relay=$(echo "$first" | cut -d'|' -f6)
-    local last_relay=$(echo "$last" | cut -d'|' -f6)
-    local relay_change=$((last_relay - first_relay))
+    # Parse connected from first and last (field 3)
+    local first_connected=$(echo "$first" | cut -d'|' -f3)
+    local last_connected=$(echo "$last" | cut -d'|' -f3)
+    local connected_change=$((last_connected - first_connected))
 
-    if [ $matched_change -gt 0 ]; then
-        echo -e "${GREEN}●${NC} Matches increased: ${GREEN}${BOLD}+$matched_change${NC}"
+    # Parse down_bytes from first and last (field 5)
+    local first_down=$(echo "$first" | cut -d'|' -f5)
+    local last_down=$(echo "$last" | cut -d'|' -f5)
+    local down_change=$((last_down - first_down))
+
+    if [ $connected_change -gt 0 ]; then
+        echo -e "${GREEN}●${NC} Connected clients increased: ${GREEN}${BOLD}+$connected_change${NC}"
     fi
 
-    if [ $relay_change -gt 0 ]; then
-        echo -e "${GREEN}●${NC} Relay activity increased: ${GREEN}${BOLD}+$relay_change${NC}"
+    if [ $connecting_change -gt 0 ]; then
+        echo -e "${CYAN}●${NC} Connecting clients increased: ${CYAN}${BOLD}+$connecting_change${NC}"
     fi
 
-    if [ $matched_change -eq 0 ] && [ $relay_change -eq 0 ]; then
+    if [ $down_change -gt 10240 ]; then  # > 10KB
+        local down_formatted=$(numfmt --to=iec-i --suffix=B $down_change 2>/dev/null || echo "${down_change}B")
+        echo -e "${GREEN}●${NC} Data transferred: ${GREEN}${BOLD}+$down_formatted${NC}"
+    fi
+
+    if [ $connected_change -eq 0 ] && [ $down_change -eq 0 ]; then
         echo -e "${YELLOW}●${NC} Waiting for first connections..."
         echo -e "${YELLOW}  Keep your node running to build reputation${NC}"
     fi
@@ -431,8 +499,7 @@ monitor_loop() {
         local stats=$(get_conduit_stats)
         if [ -n "$stats" ]; then
             show_node_status "$stats"
-            show_broker_stats "$stats"
-            show_connection_activity "$stats"
+            show_connection_stats "$stats"
             show_error_summary "$stats"
             update_history "$stats"
             show_trends
@@ -443,7 +510,8 @@ monitor_loop() {
 
         # Helpful tips at the bottom
         echo -e "${BOLD}${BLUE}═══ Tips ═══${NC}"
-        echo -e "${BLUE}●${NC} 'limited' and 'no match' messages are ${GREEN}GOOD${NC} - they mean broker communication works"
+        echo -e "${BLUE}●${NC} Monitor the ${CYAN}[STATS]${NC} lines to see real-time activity"
+        echo -e "${BLUE}●${NC} ${GREEN}Connected > 0${NC} means users are being helped right now!"
         echo -e "${BLUE}●${NC} It can take hours or days before your first client connection"
         echo -e "${BLUE}●${NC} Keep your node running 24/7 to build reputation"
         echo -e "${BLUE}●${NC} High uptime = better reputation = more connections"
