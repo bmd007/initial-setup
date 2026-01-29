@@ -10,14 +10,11 @@
 # Conntrack Monitor: https://github.com/0xf00f00/conntrack-monitor
 # Image: ghcr.io/0xf00f00/conntrack-monitor:latest
 #
-# Usage: ./setup-conntrack-monitor.sh <sudo_password>
-# Example: ./setup-conntrack-monitor.sh MyPassword123
+# Usage: ./setup-conntrack-monitor.sh
 ###############################################################################
 
 set -euo pipefail
 
-# Global sudo password
-SUDO_PASSWORD=""
 
 # Colors for output
 RED='\033[0;31m'
@@ -44,11 +41,6 @@ log_warning() {
 
 log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
-}
-
-# Sudo wrapper function
-run_sudo() {
-    echo "$SUDO_PASSWORD" | sudo -S "$@" 2>/dev/null || sudo "$@"
 }
 
 # Create docker-compose.yml
@@ -204,23 +196,6 @@ main() {
     echo "  Conntrack Monitor Setup"
     echo "=========================================="
     echo ""
-
-    # Check if password provided
-    if [ $# -eq 0 ]; then
-        log_error "Sudo password is required!"
-        log_info "Usage: ./setup-conntrack-monitor.sh <sudo_password>"
-        log_info "Example: ./setup-conntrack-monitor.sh MyPassword123"
-        exit 1
-    fi
-
-    SUDO_PASSWORD="$1"
-
-    # Validate password
-    if ! echo "$SUDO_PASSWORD" | run_sudo -S true 2>/dev/null; then
-        log_error "Invalid sudo password provided"
-        exit 1
-    fi
-    log_success "Sudo password validated"
 
     # Check if Docker is installed
     if ! command -v docker &> /dev/null; then
