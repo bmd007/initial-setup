@@ -9,7 +9,7 @@
 #
 # Conduit: https://conduit.psiphon.ca/
 #
-# Usage: cd conduit && ./setup-conduit.sh [sudo_password]
+# Usage: cd conduit && ./setup-conduit.sh
 ###############################################################################
 
 set -euo pipefail
