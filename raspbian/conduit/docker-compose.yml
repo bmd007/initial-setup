@@ -1,6 +1,6 @@
 services:
 
-  conduit:
+  conduit-deprecated:
     image: ghcr.io/ssmirr/conduit/conduit:latest
     container_name: conduit-deprecated
     command: ["start", "-b", "1024", "-m", "15", "-v"]
