@@ -77,11 +77,6 @@ check_conduit_dir() {
         exit 1
     fi
 
-    if [ ! -f "$CONDUIT_DIR/netdata/go.d/prometheus.conf" ]; then
-        log_error "Netdata config not found at: $CONDUIT_DIR/netdata/go.d/prometheus.conf"
-        exit 1
-    fi
-
     log_success "Conduit directory structure verified"
 }
 
@@ -120,7 +115,6 @@ start_conduit() {
     # Pull latest image
     log_info "Pulling latest images..."
     docker pull ghcr.io/psiphon-inc/conduit/cli:latest
-    docker pull netdata/netdata:latest
 
     # Start with docker-compose
     log_info "Starting container..."
@@ -147,38 +141,23 @@ start_conduit() {
         docker logs conduit 2>&1 | tail -20
         exit 1
     fi
-
-    if docker ps --format '{{.Names}}' | grep -q '^netdata$'; then
-        log_success "Netdata started successfully"
-    else
-        log_warning "Netdata may not have started, check logs: docker logs netdata"
-    fi
 }
 
 # Display connection info
 show_connection_info() {
     echo ""
     echo "=========================================="
-    log_success "Conduit with Netdata Setup Complete!"
+    log_success "Conduit Setup Complete!"
     echo "=========================================="
     echo ""
     log_info "Access URLs:"
-    echo "  • Netdata Dashboard: http://$SERVER_IP:19999"
     echo "  • Conduit Metrics: http://$SERVER_IP:9090/metrics"
-    echo ""
-    log_info "Netdata Features:"
-    echo "  • Real-time monitoring with 1-second resolution"
-    echo "  • Pre-configured Conduit metrics charts"
-    echo "  • Active connections tracking"
-    echo "  • Bandwidth monitoring"
-    echo "  • System resource monitoring"
     echo ""
     log_info "Management Commands:"
     echo "  • View Conduit logs: docker logs conduit -f"
-    echo "  • View Netdata logs: docker logs netdata -f"
     echo "  • Stop all: cd $CONDUIT_DIR && docker compose down"
     echo "  • Start all: cd $CONDUIT_DIR && docker compose up -d"
-    echo "  • Restart: docker restart conduit netdata"
+    echo "  • Restart: docker restart conduit"
     echo "  • Status: docker ps"
     echo ""
 }

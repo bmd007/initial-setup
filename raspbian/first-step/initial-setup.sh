@@ -127,6 +127,11 @@ display_network_info() {
     fi
 
     echo ""
+    echo ""
+
+    ip route | grep default
+
+    echo ""
     echo "=========================================="
     echo ""
 }
