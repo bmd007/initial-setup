@@ -17,7 +17,7 @@ services:
         "/home/conduit/data",
         "--metrics-addr",
         "0.0.0.0:9090",  # Listen on all interfaces (container-internal)
-        "-v"
+        "-vv"
       ]
     volumes:
       - conduit-data:/home/conduit/data
