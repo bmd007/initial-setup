@@ -76,16 +76,28 @@ create_docker_compose() {
 
     cat > "$CONDUIT_DIR/docker-compose.yml" << EOF
 services:
-  conduit:
-    image: ghcr.io/ssmirr/conduit/conduit:latest
-    container_name: conduit
-
-    command: ["start", "-b", "1024", "-m", "25", "-v"]
-
-    volumes:
-      - conduit-data:/home/conduit/data
-
-    restart: unless-stopped
+    conduit:
+        image: ghcr.io/psiphon-inc/conduit/cli:latest
+        container_name: conduit
+        restart: unless-stopped
+        ports:
+            - "9090:9090"  # Metrics port
+        command:
+            [
+                "start",
+                "--max-clients",
+                "50",
+                "--bandwidth",
+                "1024",
+                "--data-dir",
+                "/home/conduit/data",
+                "--metrics-addr",
+                "0.0.0.0:9090",
+            ]
+        # Metrics are exposed inside the container on :9090.
+        # To scrape from the host, publish the port (e.g., "9090:9090").
+        volumes:
+            - conduit-data:/home/conduit/data
 
     environment:
       - TZ=UTC
