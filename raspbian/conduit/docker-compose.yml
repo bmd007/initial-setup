@@ -1,23 +1,38 @@
 services:
+
+  conduit:
+    image: ghcr.io/ssmirr/conduit/conduit:latest
+    container_name: conduit-deprecated
+    command: ["start", "-b", "1024", "-m", "15", "-v"]
+    volumes:
+      - conduit-data:/home/conduit-dep/data
+    restart: unless-stopped
+    environment:
+      - TZ=UTC
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
   conduit:
     image: ghcr.io/psiphon-inc/conduit/cli:latest
     container_name: conduit
     restart: unless-stopped
-    # Expose to host/device for external access
     ports:
-      - "9090:9090"  # Host:Container - accessible from device/network
+      - "9090:9090"
     command:
       [
         "start",
         "--max-clients",
-        "50",
+        "2",
         "--bandwidth",
         "1024",
         "--data-dir",
         "/home/conduit/data",
         "--metrics-addr",
-        "0.0.0.0:9090",  # Listen on all interfaces (container-internal)
-        "-vv"
+        "0.0.0.0:9090",
+        "-v"
       ]
     volumes:
       - conduit-data:/home/conduit/data
@@ -28,7 +43,6 @@ services:
       options:
         max-size: "100m"
         max-file: "5"
-    # Internal Docker network for service-to-service communication
     networks:
       - monitoring
 
@@ -76,8 +90,5 @@ volumes:
     driver: local
 
 networks:
-  # Internal bridge network for container-to-container communication
-  # Services communicate via service names (e.g., http://conduit:9090)
-  # This traffic never leaves the Docker host
   monitoring:
     driver: bridge
