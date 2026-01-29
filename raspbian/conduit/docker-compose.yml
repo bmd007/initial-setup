@@ -3,8 +3,9 @@ services:
     image: ghcr.io/psiphon-inc/conduit/cli:latest
     container_name: conduit
     restart: unless-stopped
+    # Expose to host/device for external access
     ports:
-      - "9090:9090"
+      - "9090:9090"  # Host:Container - accessible from device/network
     command:
       [
         "start",
@@ -15,7 +16,7 @@ services:
         "--data-dir",
         "/home/conduit/data",
         "--metrics-addr",
-        "0.0.0.0:9090",
+        "0.0.0.0:9090",  # Listen on all interfaces (container-internal)
         "-v"
       ]
     volumes:
@@ -27,59 +28,56 @@ services:
       options:
         max-size: "100m"
         max-file: "5"
+    # Internal Docker network for service-to-service communication
     networks:
       - monitoring
 
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: prometheus
+  netdata:
+    image: netdata/netdata:latest
+    container_name: netdata
     restart: unless-stopped
+    # Expose to host/device for dashboard access
     ports:
-      - "9091:9090"
+      - "19999:19999"  # Host:Container - accessible from device/network
+    cap_add:
+      - SYS_PTRACE
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus-data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
-      - '--web.console.templates=/usr/share/prometheus/consoles'
-      - '--storage.tsdb.retention.time=30d'
-      - '--web.enable-lifecycle'
+      - netdata-config:/etc/netdata
+      - netdata-lib:/var/lib/netdata
+      - netdata-cache:/var/cache/netdata
+      - /etc/passwd:/host/etc/passwd:ro
+      - /etc/group:/host/etc/group:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Netdata config: scrapes Conduit via internal network (http://conduit:9090)
+      - ./netdata/go.d/prometheus.conf:/etc/netdata/go.d/prometheus.conf:ro
+    environment:
+      - TZ=UTC
+      - NETDATA_CLAIM_TOKEN=
+      - NETDATA_CLAIM_URL=
+    # Internal Docker network - Netdata talks to Conduit via 'conduit:9090'
     networks:
       - monitoring
     depends_on:
       - conduit
 
-  grafana:
-    image: grafana/grafana:latest
-    container_name: grafana
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_INSTALL_PLUGINS=
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_ROOT_URL=http://localhost:3000
-      - GF_ANALYTICS_REPORTING_ENABLED=false
-    networks:
-      - monitoring
-    depends_on:
-      - prometheus
-
 volumes:
   conduit-data:
     driver: local
-  prometheus-data:
+  netdata-config:
     driver: local
-  grafana-data:
+  netdata-lib:
+    driver: local
+  netdata-cache:
     driver: local
 
 networks:
+  # Internal bridge network for container-to-container communication
+  # Services communicate via service names (e.g., http://conduit:9090)
+  # This traffic never leaves the Docker host
   monitoring:
     driver: bridge

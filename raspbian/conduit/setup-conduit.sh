@@ -77,13 +77,8 @@ check_conduit_dir() {
         exit 1
     fi
 
-    if [ ! -f "$CONDUIT_DIR/prometheus/prometheus.yml" ]; then
-        log_error "Prometheus config not found at: $CONDUIT_DIR/prometheus/prometheus.yml"
-        exit 1
-    fi
-
-    if [ ! -d "$CONDUIT_DIR/grafana/provisioning" ]; then
-        log_error "Grafana provisioning directory not found at: $CONDUIT_DIR/grafana/provisioning"
+    if [ ! -f "$CONDUIT_DIR/netdata/go.d/prometheus.conf" ]; then
+        log_error "Netdata config not found at: $CONDUIT_DIR/netdata/go.d/prometheus.conf"
         exit 1
     fi
 
@@ -125,8 +120,7 @@ start_conduit() {
     # Pull latest image
     log_info "Pulling latest images..."
     docker pull ghcr.io/psiphon-inc/conduit/cli:latest
-    docker pull prom/prometheus:latest
-    docker pull grafana/grafana:latest
+    docker pull netdata/netdata:latest
 
     # Start with docker-compose
     log_info "Starting container..."
@@ -154,16 +148,10 @@ start_conduit() {
         exit 1
     fi
 
-    if docker ps --format '{{.Names}}' | grep -q '^prometheus$'; then
-        log_success "Prometheus started successfully"
+    if docker ps --format '{{.Names}}' | grep -q '^netdata$'; then
+        log_success "Netdata started successfully"
     else
-        log_warning "Prometheus may not have started, check logs: docker logs prometheus"
-    fi
-
-    if docker ps --format '{{.Names}}' | grep -q '^grafana$'; then
-        log_success "Grafana started successfully"
-    else
-        log_warning "Grafana may not have started, check logs: docker logs grafana"
+        log_warning "Netdata may not have started, check logs: docker logs netdata"
     fi
 }
 
@@ -171,30 +159,27 @@ start_conduit() {
 show_connection_info() {
     echo ""
     echo "=========================================="
-    log_success "Conduit Monitoring Stack Setup Complete!"
+    log_success "Conduit with Netdata Setup Complete!"
     echo "=========================================="
     echo ""
     log_info "Access URLs:"
-    echo "  • Grafana Dashboard: http://$SERVER_IP:3000"
-    echo "    - Username: admin"
-    echo "    - Password: admin"
-    echo "  • Prometheus: http://$SERVER_IP:9091"
+    echo "  • Netdata Dashboard: http://$SERVER_IP:19999"
     echo "  • Conduit Metrics: http://$SERVER_IP:9090/metrics"
+    echo ""
+    log_info "Netdata Features:"
+    echo "  • Real-time monitoring with 1-second resolution"
+    echo "  • Pre-configured Conduit metrics charts"
+    echo "  • Active connections tracking"
+    echo "  • Bandwidth monitoring"
+    echo "  • System resource monitoring"
     echo ""
     log_info "Management Commands:"
     echo "  • View Conduit logs: docker logs conduit -f"
-    echo "  • View Prometheus logs: docker logs prometheus -f"
-    echo "  • View Grafana logs: docker logs grafana -f"
+    echo "  • View Netdata logs: docker logs netdata -f"
     echo "  • Stop all: cd $CONDUIT_DIR && docker compose down"
     echo "  • Start all: cd $CONDUIT_DIR && docker compose up -d"
-    echo "  • Restart: docker restart conduit prometheus grafana"
+    echo "  • Restart: docker restart conduit netdata"
     echo "  • Status: docker ps"
-    echo ""
-    log_info "The Grafana dashboard is pre-configured with:"
-    echo "  • Active Connections gauge and graph"
-    echo "  • Bandwidth usage monitoring"
-    echo "  • Connection rates"
-    echo "  • Error tracking"
     echo ""
 }
 
