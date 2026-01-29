@@ -8,9 +8,8 @@
 # - Manages Conduit lifecycle
 #
 # Conduit: https://conduit.psiphon.ca/
-# Image: ghcr.io/ssmirr/conduit/conduit:latest
 #
-# Usage: ./setup-conduit.sh
+# Usage: cd conduit && ./setup-conduit.sh [sudo_password]
 ###############################################################################
 
 set -euo pipefail
@@ -23,7 +22,8 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 # Configuration
-CONDUIT_DIR="$HOME/conduit"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONDUIT_DIR="$SCRIPT_DIR"
 SERVER_IP=""
 
 # Logging functions
@@ -68,48 +68,26 @@ get_server_ip() {
     fi
 }
 
-create_docker_compose() {
-    log_info "Creating docker-compose.yml for Conduit..."
+check_conduit_dir() {
+    log_info "Checking Conduit directory structure..."
 
-    mkdir -p "$CONDUIT_DIR"
+    if [ ! -f "$CONDUIT_DIR/docker-compose.yml" ]; then
+        log_error "docker-compose.yml not found at: $CONDUIT_DIR/docker-compose.yml"
+        log_error "Make sure you're running this script from the conduit directory"
+        exit 1
+    fi
 
-    cat > "$CONDUIT_DIR/docker-compose.yml" << EOF
-services:
-  conduit:
-    image: ghcr.io/psiphon-inc/conduit/cli:latest
-    container_name: conduit
-    restart: unless-stopped
-    ports:
-      - "9090:9090"
-    command:
-      [
-        "start",
-        "--max-clients",
-        "50",
-        "--bandwidth",
-        "1024",
-        "--data-dir",
-        "/home/conduit/data",
-        "--metrics-addr",
-        "0.0.0.0:9090",
-        "-v"
-      ]
-    volumes:
-      - conduit-data:/home/conduit/data
-    environment:
-      - TZ=UTC
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "100m"
-        max-file: "5"
+    if [ ! -f "$CONDUIT_DIR/prometheus/prometheus.yml" ]; then
+        log_error "Prometheus config not found at: $CONDUIT_DIR/prometheus/prometheus.yml"
+        exit 1
+    fi
 
-volumes:
-  conduit-data:
-    driver: local
-EOF
+    if [ ! -d "$CONDUIT_DIR/grafana/provisioning" ]; then
+        log_error "Grafana provisioning directory not found at: $CONDUIT_DIR/grafana/provisioning"
+        exit 1
+    fi
 
-    log_success "docker-compose.yml created at $CONDUIT_DIR"
+    log_success "Conduit directory structure verified"
 }
 
 # Stop and remove existing container
@@ -145,8 +123,10 @@ start_conduit() {
     cd "$CONDUIT_DIR"
 
     # Pull latest image
-    log_info "Pulling latest Conduit image..."
-    docker pull ghcr.io/ssmirr/conduit/conduit:latest
+    log_info "Pulling latest images..."
+    docker pull ghcr.io/psiphon-inc/conduit/cli:latest
+    docker pull prom/prometheus:latest
+    docker pull grafana/grafana:latest
 
     # Start with docker-compose
     log_info "Starting container..."
@@ -165,7 +145,7 @@ start_conduit() {
     log_info "Waiting for Conduit to start..."
     sleep 3
 
-    # Check if container is running
+    # Check if containers are running
     if docker ps --format '{{.Names}}' | grep -q '^conduit$'; then
         log_success "Conduit started successfully"
     else
@@ -173,22 +153,48 @@ start_conduit() {
         docker logs conduit 2>&1 | tail -20
         exit 1
     fi
+
+    if docker ps --format '{{.Names}}' | grep -q '^prometheus$'; then
+        log_success "Prometheus started successfully"
+    else
+        log_warning "Prometheus may not have started, check logs: docker logs prometheus"
+    fi
+
+    if docker ps --format '{{.Names}}' | grep -q '^grafana$'; then
+        log_success "Grafana started successfully"
+    else
+        log_warning "Grafana may not have started, check logs: docker logs grafana"
+    fi
 }
 
 # Display connection info
 show_connection_info() {
     echo ""
     echo "=========================================="
-    log_success "Conduit Setup Complete!"
+    log_success "Conduit Monitoring Stack Setup Complete!"
     echo "=========================================="
     echo ""
-    log_info "Management Commands:"
-    echo "  • View logs: docker logs conduit -f"
-    echo "  • Stop: cd $CONDUIT_DIR && docker compose down"
-    echo "  • Start: cd $CONDUIT_DIR && docker compose up -d"
-    echo "  • Restart: docker restart conduit"
-    echo "  • Status: docker ps | grep conduit"
+    log_info "Access URLs:"
+    echo "  • Grafana Dashboard: http://$SERVER_IP:3000"
+    echo "    - Username: admin"
+    echo "    - Password: admin"
+    echo "  • Prometheus: http://$SERVER_IP:9091"
+    echo "  • Conduit Metrics: http://$SERVER_IP:9090/metrics"
     echo ""
+    log_info "Management Commands:"
+    echo "  • View Conduit logs: docker logs conduit -f"
+    echo "  • View Prometheus logs: docker logs prometheus -f"
+    echo "  • View Grafana logs: docker logs grafana -f"
+    echo "  • Stop all: cd $CONDUIT_DIR && docker compose down"
+    echo "  • Start all: cd $CONDUIT_DIR && docker compose up -d"
+    echo "  • Restart: docker restart conduit prometheus grafana"
+    echo "  • Status: docker ps"
+    echo ""
+    log_info "The Grafana dashboard is pre-configured with:"
+    echo "  • Active Connections gauge and graph"
+    echo "  • Bandwidth usage monitoring"
+    echo "  • Connection rates"
+    echo "  • Error tracking"
     echo ""
 }
 
@@ -219,9 +225,9 @@ main() {
     # Get server IP
     get_server_ip
 
-    # Create Docker Compose file
+    # Check conduit directory structure
     echo ""
-    create_docker_compose
+    check_conduit_dir
 
     # Remove existing installation
     echo ""
