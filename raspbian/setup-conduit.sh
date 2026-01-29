@@ -80,7 +80,7 @@ services:
     image: ghcr.io/ssmirr/conduit/conduit:latest
     container_name: conduit
 
-    command: ["start", "-b", "1024", "-m", "10", "-v"]
+    command: ["start", "-b", "1024", "-m", "25", "-v"]
 
     volumes:
       - conduit-data:/home/conduit/data
