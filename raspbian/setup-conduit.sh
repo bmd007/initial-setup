@@ -92,7 +92,7 @@ services:
         "/home/conduit/data",
         "--metrics-addr",
         "0.0.0.0:9090",
-        "-v
+        "-v"
       ]
     volumes:
       - conduit-data:/home/conduit/data
