@@ -71,8 +71,8 @@ get_server_ip() {
 check_conduit_dir() {
     log_info "Checking Conduit directory structure..."
 
-    if [ ! -f "$CONDUIT_DIR/docker-compose.yml" ]; then
-        log_error "docker-compose.yml not found at: $CONDUIT_DIR/docker-compose.yml"
+    if [ ! -f "$CONDUIT_DIR/docker-compose.yaml" ]; then
+        log_error "docker-compose.yaml not found at: $CONDUIT_DIR/docker-compose.yaml"
         log_error "Make sure you're running this script from the conduit directory"
         exit 1
     fi
@@ -98,7 +98,7 @@ remove_existing() {
     fi
 
     # Check for docker-compose
-    if [ -f "$CONDUIT_DIR/docker-compose.yml" ]; then
+    if [ -f "$CONDUIT_DIR/docker-compose.yaml" ]; then
         log_info "Bringing down existing docker-compose setup..."
         cd "$CONDUIT_DIR"
         docker-compose down 2>/dev/null || docker compose down 2>/dev/null || true
@@ -150,15 +150,10 @@ show_connection_info() {
     log_success "Conduit Setup Complete!"
     echo "=========================================="
     echo ""
-    log_info "Access URLs:"
-    echo "  • Conduit Metrics: http://$SERVER_IP:9090/metrics"
-    echo ""
     log_info "Management Commands:"
     echo "  • View Conduit logs: docker logs conduit -f"
     echo "  • Stop all: cd $CONDUIT_DIR && docker compose down"
     echo "  • Start all: cd $CONDUIT_DIR && docker compose up -d"
-    echo "  • Restart: docker restart conduit"
-    echo "  • Status: docker ps"
     echo ""
 }
 
